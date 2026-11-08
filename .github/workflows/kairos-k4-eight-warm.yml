@@ -88,7 +88,7 @@ jobs:
           PY
           python3 scripts/kairos_playback_v2.py k4-evidence.zip --output out/k4-eight/playback-v2-result.json
           sha256sum scripts/kairos_playback_v2.py > out/k4-eight/analyzer-sha256.txt
-          python3 scripts/kairos_m0_m1_compare.py k4-evidence.zip out/k4-eight/M0-M1.json
+          python3 scripts/kairos_m0_m1_k4.py k4-evidence.zip out/k4-eight/M0-M1.json
       - name: Upload evidence even on failure
         if: always()
         uses: actions/upload-artifact@v4
