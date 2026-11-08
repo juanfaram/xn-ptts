@@ -26,3 +26,12 @@ El script `scripts/kairos_ws_k1_control.py` contiene `ts_recv_monotonic_s`, `fra
 
 ## Alcance
 No construir proxy, panel ni diagnóstico comercial; no tocar KV, caché, cuantización ni GPU. Los precios, SES y cruce de actividad quedan para puertas posteriores.
+
+## Nota matemática crítica (v3, pendiente de reconciliar con v2)
+La expresión propuesta `R_i = t_i - (t_0 + P + i*frag_ms)` es **tardanza**, no reserva: un valor negativo indica llegada temprana. Por ello, imponer `R_i < 0` como agotamiento invierte la desigualdad física. El analizador v3 emplea **reserva** `B_i=(t_0+P+sum_{j<i} frag_ms_j)-t_i`, con agotamiento `B_i<0`. Se conserva la fórmula propuesta como especificación pendiente de reconciliación con el v2, no como umbral certificado. M0 usa P=0 y M1 P=2*frag_ms_0. El primer fragmento define t0. Un episodio es una racha contigua de B_i<0. El valor inicial B_0=0 en M0 no constituye agotamiento.
+
+**Advertencia:** esta convención de reproducción produce reserva basal mínima 0 ms (M0) y 160 ms (M1) para el k1 de 42 fragmentos; no reproduce el basal de 38,05 ms citado anteriormente. Por tanto **C2 y puerta 1b siguen abiertos** hasta recuperar y comparar el v2, su código y su definición exacta. No se ajustan fórmulas retrospectivamente para forzar una coincidencia.
+
+**Warm-up:** una generación de calentamiento independiente se descarta de la muestra de cinco repeticiones, pero se conserva en evidencia. La referencia separada de k1 en run 42512393491 es una generación previa, no se certifica como warm-up equivalente sin comprobar el procedimiento.
+
+**C4:** el arnés histórico registra `ttfa_ms` medido después de enviar el texto y alrededor del flush. No identifica por separado `ttfa_request_ms` (desde petición original, incluye espera) y `ttfa_admitted_ms` (desde admisión efectiva). No se declara C4 medido de forma comparable entre brazos hasta reconstruir o capturar ambas marcas.
