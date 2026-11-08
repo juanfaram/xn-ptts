@@ -28,7 +28,7 @@ once("fn bench_synth(args: &Args, normalize: Normalize, quant: Quant) -> Result<
     anyhow::ensure!(args.concurrency >= 1 && args.repeats >= 1, "invalid k/repeats");
     let path = args.events_csv.as_ref().context("--events-csv required")?;
     let mut out = std::io::BufWriter::new(std::fs::File::create(path)?);
-    writeln!(out, "wave,phase,k,flow,chunk,arrival_ns,interval_ns,samples,chunk_dur_ms,ttfa_ns,sha256")?;
+    writeln!(out, "wave,phase,k,flow,chunk,arrival_ns,interval_ns,frag_samples,frag_ms,ttfa_request_ms,ttfa_admitted_ms,sha256")?;
     let opts = SpeechOptions::default().seed(args.seed);
     for wave in 0..(args.warmup + args.repeats) {
         let barrier = Arc::new(Barrier::new(args.concurrency + 1));
@@ -77,10 +77,10 @@ once("fn bench_synth(args: &Args, normalize: Normalize, quant: Quant) -> Result<
                 let interval = if i == 0 { String::new() } else {
                     (at - chunks[i-1].0).to_string()
                 };
-                writeln!(out, "{},{},{},{},{},{},{},{},{:.6},{},{}",
+                writeln!(out, "{},{},{},{},{},{},{},{:.6},{},{},{}",
                     wave, if wave < args.warmup {"warmup"} else {"measured"},
                     args.concurrency, flow, i, at, interval, samples,
-                    (*samples as f64 * 1000.0 / tts.sample_rate() as f64), ttfa, hash)?;
+                    (*samples as f64 * 1000.0 / sample_rate), ttfa, ttfa, hash)?;
             }
         }
     }
