@@ -77,7 +77,7 @@ once("fn bench_synth(args: &Args, normalize: Normalize, quant: Quant) -> Result<
                 let interval = if i == 0 { String::new() } else {
                     (at - chunks[i-1].0).to_string()
                 };
-                writeln!(out, "{},{},{},{},{},{},{},{:.6},{},{},{}",
+                writeln!(out, "{},{},{},{},{},{},{},{},{:.6},{},{},{}",
                     wave, if wave < args.warmup {"warmup"} else {"measured"},
                     args.concurrency, flow, i, at, interval, samples,
                     (*samples as f64 * 1000.0 / sample_rate), ttfa, ttfa, hash)?;
