@@ -35,3 +35,8 @@ La expresión propuesta `R_i = t_i - (t_0 + P + i*frag_ms)` es **tardanza**, no 
 **Warm-up:** una generación de calentamiento independiente se descarta de la muestra de cinco repeticiones, pero se conserva en evidencia. La referencia separada de k1 en run 42512393491 es una generación previa, no se certifica como warm-up equivalente sin comprobar el procedimiento.
 
 **C4:** el arnés histórico registra `ttfa_ms` medido después de enviar el texto y alrededor del flush. No identifica por separado `ttfa_request_ms` (desde petición original, incluye espera) y `ttfa_admitted_ms` (desde admisión efectiva). No se declara C4 medido de forma comparable entre brazos hasta reconstruir o capturar ambas marcas.
+
+## Corrección de evaluabilidad del arranque (v3)
+En M0 se excluye el fragmento 0 del mínimo y de los episodios; se evalúa desde índice 1. En M1 se excluyen fragmentos 0 y 1 por precarga; se evalúa desde índice 2. **Reserva = plazo - llegada; reserva negativa indica déficit**. Un valor positivo es margen disponible, no falta de audio. El primer índice evaluable de M0 puede dar 38,05 ms si el intervalo inicial es 41,95 ms, pero esa coincidencia es una hipótesis hasta cotejar el ZIP y el v2.
+
+La duración de un episodio y la reserva por fragmento necesitan verificación cruzada contra v2 antes de congelar C1–C3. No equiparar la suma de máximos déficits de rachas con tiempo físico sin audio sin demostrarlo. Tests offline en `.github/workflows/kairos-analyzer-v3-tests.yml`; su ejecución verde y hash exacto siguen pendientes de comprobación.
