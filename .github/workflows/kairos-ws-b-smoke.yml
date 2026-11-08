@@ -1,0 +1,26 @@
+name: KAIROS WS B client protocol smoke (no model)
+on:
+  push:
+    branches:
+      - 'run/kairos-ws-control-b'
+permissions:
+  contents: read
+jobs:
+  protocol:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Python syntax and dependency
+        run: |
+          python3 -m pip install websockets
+          python3 -m py_compile scripts/kairos_ws_load.py scripts/kairos_ws_selftest.py scripts/kairos_sensitivity.py
+      - name: Test client against local protocol fixture
+        run: python3 scripts/kairos_ws_selftest.py
+      - name: Produce explicitly hypothetical sensitivity table
+        run: python3 scripts/kairos_sensitivity.py
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: kairos-ws-b-protocol-and-sensitivity
+          path: out/
+          retention-days: 30
