@@ -1,0 +1,66 @@
+name: KAIROS Phonon pinned k1 baseline
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  k1:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Checkout exact Gradium commit
+        uses: actions/checkout@v4
+        with:
+          ref: e5110afd3ead725c940b6411eec4985fb8b111aa
+          persist-credentials: false
+      - name: Capture environment
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p kairos-results
+          {
+            echo "checkout_commit=$(git rev-parse HEAD)"
+            echo "runner_sha=$GITHUB_SHA"
+            echo "threads=$(nproc)"
+            uname -a
+            lscpu
+            free -m
+            df -h
+          } | tee kairos-results/environment.log
+          test "$(git rev-parse HEAD)" = "e5110afd3ead725c940b6411eec4985fb8b111aa"
+      - name: Build official benchmark
+        run: cargo build --release -p ptts --example bench
+      - name: Download public Phonon 31m model
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m pip install --user huggingface_hub
+          python - <<'PY'
+          from huggingface_hub import snapshot_download
+          path = snapshot_download(repo_id="gradium/phonon-31m-en", local_dir="phonon-model")
+          print("Model downloaded:", path)
+          PY
+          find phonon-model -maxdepth 3 -type f | sort | tee kairos-results/model-files.log
+      - name: Run official sequential k1 benchmark twice
+        shell: bash
+        run: |
+          set -euo pipefail
+          MODEL="$(find phonon-model -type f \( -name '*.safetensors' -o -name '*.gguf' \) | grep -v '/voices/' | head -1)"
+          CONFIG="$(find phonon-model -type f -name config.json | head -1)"
+          VOICE="$(find phonon-model -type f -name '*.safetensors' | grep '/voices/' | head -1 || true)"
+          if [ -z "$VOICE" ]; then
+            echo 'No standalone voice embedding found. Inspect model-files.log; do not invent a voice.' >&2
+            exit 1
+          fi
+          for REP in 1 2; do
+            ./target/release/examples/bench --model "$MODEL" --config "$CONFIG" --voice "$VOICE" --lang en --cpu --threads "$(nproc)" --seed 42 --iters 10 --warmup 2 --per-iter 2>&1 | tee "kairos-results/k1_rep${REP}.log"
+          done
+      - name: Upload audit logs even on failure
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: kairos-k1-audit
+          path: kairos-results/
+          retention-days: 30
