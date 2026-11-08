@@ -22,8 +22,12 @@ jobs:
           git diff --exit-code e5110afd3ead725c940b6411eec4985fb8b111aa HEAD -- ptts/src ptts/examples/bench.rs ptts/Cargo.toml
           { git rev-parse HEAD; git log --oneline -3; git diff --stat e5110afd3ead725c940b6411eec4985fb8b111aa; nproc; lscpu; free -m; } > out/env.txt
           git diff e5110afd3ead725c940b6411eec4985fb8b111aa HEAD > out/patch.diff
-      - name: Mutation test of checker
-        run: python3 scripts/check.py --self-test
+      - name: Mandatory mutation test of delivery gap checker
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 scripts/check.py --self-test
+          echo 'Mutation assertion passed; validator is not decorative'
       - name: Apply isolated patch and compile
         run: |
           python3 scripts/kairos_patch_bench.py
@@ -58,18 +62,11 @@ jobs:
             ./target/release/examples/bench --model phonon-model/model.safetensors --config phonon-model/config.json --voice "$VOICE" --lang en --cpu --threads "$(nproc)" --seed 42 --concurrency 1 --repeats 1 --warmup 0 --events-csv "out/k1_r$R/flows.csv" 2>&1 | tee "out/k1_r$R/run.log"
             python3 scripts/check.py "out/k1_r$R/flows.csv"
           done
-      - name: Compare k1 audio hashes (fail closed)
+      - name: Compare k1 audio hashes (report and branch)
         shell: bash
         run: |
-          python3 - <<'PY'
-          import csv
-          def hashes(p):
-              with open(p,newline="") as f: return {r["flow"]:r["sha256"] for r in csv.DictReader(f)}
-          a=hashes("out/k1_r1/flows.csv");b=hashes("out/k1_r2/flows.csv")
-          print("k1 reference:",a,"k1 repeat:",b)
-          if a!=b: raise SystemExit("k1 NONDETERMINISTIC: no k2 run; inspect f32le audio for tolerance")
-          print("k1 deterministic f32 sample hash PASS")
-          PY
+          set -euo pipefail
+          python3 scripts/compare_audio.py
       - name: k2 one concurrent validation wave
         shell: bash
         run: |
@@ -78,20 +75,11 @@ jobs:
           VOICE="$(cat out/voice.txt)"
           ./target/release/examples/bench --model phonon-model/model.safetensors --config phonon-model/config.json --voice "$VOICE" --lang en --cpu --threads "$(nproc)" --seed 42 --concurrency 2 --repeats 1 --warmup 0 --events-csv out/k2/flows.csv 2>&1 | tee out/k2/run.log
           python3 scripts/check.py out/k2/flows.csv
-      - name: Compare k2 audio hashes to k1 reference
+      - name: Compare k2 audio hashes and tolerance to k1
         shell: bash
         run: |
-          python3 - <<'PY'
-          import csv
-          def hashes(p):
-              with open(p,newline="") as f:return {r["flow"]:r["sha256"] for r in csv.DictReader(f)}
-          baseline=next(iter(hashes("out/k1_r1/flows.csv").values()))
-          k2=hashes("out/k2/flows.csv")
-          print("baseline:",baseline,"k2:",k2)
-          if len(k2)!=2 or any(h!=baseline for h in k2.values()):
-              raise SystemExit("k2 hash mismatch against k1; report, do not silently retry")
-          print("k2 identity PASS")
-          PY
+          set -euo pipefail
+          python3 scripts/compare_audio.py
       - name: Upload evidence even if a check fails
         if: always()
         uses: actions/upload-artifact@v4
