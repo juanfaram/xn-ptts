@@ -1,0 +1,64 @@
+name: KAIROS experimental WS C generation admission
+on:
+  push:
+    branches:
+      - 'run/kairos-ws-control-b'
+permissions:
+  contents: read
+jobs:
+  ws-b:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify frozen Gradium source
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch origin e5110afd3ead725c940b6411eec4985fb8b111aa --depth=1
+          git diff --exit-code e5110afd3ead725c940b6411eec4985fb8b111aa HEAD -- ptts/src ptts-ws-server/src ptts-ws-server/Cargo.toml
+          mkdir -p out
+          { echo "pinned_source=e5110afd3ead725c940b6411eec4985fb8b111aa"; echo "runner_sha=$GITHUB_SHA"; echo "threads=$(nproc)"; lscpu; free -m; } > out/environment.log
+      - name: Install client and self-test protocol
+        run: |
+          python3 -m pip install websockets huggingface_hub
+          python3 scripts/kairos_ws_selftest.py
+      - name: Apply isolated experimental C patch\n        run: python3 scripts/kairos_patch_ws_c.py\n      - name: Build experimental Phonon WS server
+        env:
+          RUSTFLAGS: '-C target-cpu=x86-64'
+        run: cargo build --release -p ptts-ws-server
+      - name: Download public model
+        run: |
+          python3 - <<'PY'
+          from huggingface_hub import snapshot_download
+          print(snapshot_download(repo_id="gradium/phonon-31m-en",local_dir="phonon-model"))
+          PY
+      - name: Start experimental C server and run identical phases
+        shell: bash
+        run: |
+          set -euo pipefail
+          RAYON_NUM_THREADS="$(nproc)" ./target/release/ptts-ws-server --addr 127.0.0.1:8080 --model phonon-model --lang en --device cpu --max-concurrent-requests 41 --voice-dir phonon-model > out/server.log 2>&1 &
+          PID=$!
+          trap 'kill "$PID" 2>/dev/null || true' EXIT
+          READY=0
+          for i in $(seq 1 120); do
+            if ! kill -0 "$PID" 2>/dev/null; then echo 'SERVER_EXITED'; tail -100 out/server.log; exit 1; fi
+            if python3 - <<'PY'
+          import socket
+          s=socket.socket();s.settimeout(.2)
+          try:s.connect(('127.0.0.1',8080));exit(0)
+          except OSError:exit(1)
+          finally:s.close()
+          PY
+            then READY=1;break;fi
+            sleep 1
+          done
+          if [ "$READY" != 1 ]; then echo 'SERVER_START_TIMEOUT'; tail -100 out/server.log; exit 1; fi
+          python3 scripts/kairos_ws_phased.py --arm C --permits 41 --idle-seconds 30 --timeout 180 --output out/ws-c-phased.json 2>&1 | tee out/ws-client.log
+      - name: Upload all logs even on failure
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: kairos-experimental-ws-c
+          path: out/
+          retention-days: 30
