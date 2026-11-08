@@ -71,7 +71,7 @@ jobs:
           for f in sorted(p.iterdir()):
               if f.is_file() and f.name!='manifest.json':
                   items[f.name]=hashlib.sha256(f.read_bytes()).hexdigest()
-          (p/'manifest.json').write_text(json.dumps({'sha256_files':items,'meaning':'Evidence integrity only; does not certify clean delivery'},indent=2)+'\\n')
+          (p/'manifest.json').write_text(json.dumps({'sha256_files':items,'meaning':'Evidence integrity only; does not certify clean delivery'},indent=2)+'\n')
           PY
       - name: Upload evidence even on failure
         if: always()
