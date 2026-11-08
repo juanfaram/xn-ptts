@@ -88,7 +88,16 @@ jobs:
           for f in sorted(p.rglob('*')):
               if f.is_file() and f.name!='manifest.json':
                   items[str(f.relative_to(p))]=hashlib.sha256(f.read_bytes()).hexdigest()
-          (p/'manifest.json').write_text(json.dumps({'sha256_files':items,'meaning':'Evidence integrity only; does not certify clean delivery'},indent=2)+'\\n')
+          manifest = p/'manifest.json'
+          manifest.write_text(json.dumps({'sha256_files':items,'meaning':'Evidence integrity only; does not certify clean delivery'},indent=2)+'\n')
+          parsed=json.loads(manifest.read_text())
+          assert parsed['sha256_files']==items
+          try:
+              json.loads(manifest.read_text()+'INVALID')
+          except json.JSONDecodeError:
+              pass
+          else:
+              raise AssertionError('Malformed manifest unexpectedly accepted')
           PY
       - name: Upload evidence even on failure
         if: always()
