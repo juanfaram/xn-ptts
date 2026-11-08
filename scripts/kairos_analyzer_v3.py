@@ -14,9 +14,14 @@ def analyze(frags, preload):
     for f in frags:
         reserve.append(t0 + p + cumulative - f["ts_recv_monotonic_s"] * 1000)
         cumulative += f["frag_ms"]
+    start = 1 if preload == 0 else 2
+    evaluable = reserve[start:]
+    if not evaluable:
+        raise ValueError("insufficient fragments for evaluable reserve")
     episodes = []
     active = None
     for i, r in enumerate(reserve):
+        if i < start: continue
         if r < -1e-6:
             if active is None:
                 active = {"start_idx": i, "end_idx": i, "max_deficit_ms": -r}
@@ -32,7 +37,7 @@ def analyze(frags, preload):
         e["duration_ms"] = round(e["max_deficit_ms"], 5)
         e["max_deficit_ms"] = round(e["max_deficit_ms"], 5)
         e["depth_fragments"] = e["end_idx"] - e["start_idx"] + 1
-    return {"minimum_reserve_ms": round(min(reserve), 5),
+    return {"minimum_reserve_ms": round(min(evaluable), 5),
             "exhaustion_count": len(episodes), "episodes": episodes,
             "total_no_audio_ms": round(sum(e["duration_ms"] for e in episodes), 5),
             "max_depth_fragments": max((e["depth_fragments"] for e in episodes), default=0)}
@@ -60,8 +65,11 @@ def test():
     for model in (0, 2):
         x = analyze(trace({35:500}), model)
         assert x["exhaustion_count"] in (0,1)
-    assert analyze(trace({1:1}), 0)["exhaustion_count"] == 1
+    assert analyze(trace({1:1}), 0)["exhaustion_count"] == 0
+    assert analyze(trace({2:1}), 0)["exhaustion_count"] == 1
     assert analyze(trace({1:1}), 2)["exhaustion_count"] == 0
+    assert analyze(trace({}), 0)["minimum_reserve_ms"] == 0
+    assert analyze(trace({}), 2)["minimum_reserve_ms"] == 160
     import tempfile
     with tempfile.TemporaryDirectory() as d:
         p = Path(d)/"test.zip"
