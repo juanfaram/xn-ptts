@@ -126,12 +126,22 @@ async def main(args):
                         "ttfa_sample_p99_ms":percentile([r["ttfa_ms"] for r in all_rows if r["k"]==k and r["status"]=="ok"],.99),
                         "max_delivery_gap_ratio":max((r["worst_ratio"] for r in all_rows if r["k"]==k and r["status"]=="ok"),default=None),
                         "max_rss_mib":max((r["memory_rss_mib"] for r in all_rows if r["k"]==k and r["memory_rss_mib"] is not None),default=None)})
-        (args.output/"summary.json").write_text(json.dumps({"last_certified_k":last_clean,"levels":summary,"gap_positions_by_wave":gap_map,"note":"5 waves; sample p99 is unstable; gap proxy, not audible underrun; no admission queue measured"},indent=2)+"\n")
         if failures==0:last_clean=k
         if failures>=2:
             print(f"STOP: first reproducible failure at k={k}; last clean={last_clean}",flush=True)
             break
-    (args.output/"summary.json").write_text(json.dumps({"last_certified_k":last_clean,"levels":summary,"note":"3 waves, not stable p99; strict gap proxy; no admission queue measured"},indent=2)+"\n")
+    repetition_files = sorted(args.output.glob("k*-r*-ratios.json"))
+    report = {"last_certified_k":last_clean,"levels":summary,
+              "gap_positions_by_wave":gap_map,
+              "repetition_files":[p.name for p in repetition_files],
+              "repetition_file_count":len(repetition_files),
+              "note":"Counted actual repetition files; sample p99 is unstable; gap proxy, not audible underrun; no admission queue measured"}
+    dest = args.output/"summary.json"
+    version = 1
+    while dest.exists():
+        dest = args.output/f"summary.{version}.json"
+        version += 1
+    dest.write_text(json.dumps(report,indent=2)+"\\n")
 
 if __name__=="__main__":
     p=argparse.ArgumentParser()
