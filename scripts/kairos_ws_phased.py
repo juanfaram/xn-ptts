@@ -92,8 +92,12 @@ async def main(args):
         if not warm.d["chunks"]:raise RuntimeError("warmup produced no audio")
         results["phases"]["warmup"]=warm.d
         await warm.close()
+        # Server releases the warmup session slot asynchronously after socket close.
+        # Wait for its teardown before starting the exact 8-session occupancy phase.
+        await asyncio.sleep(1.0)
         first=await asyncio.gather(*(connect(i) for i in range(8)))
         if sum(c.d["accepted"] for c in first)!=8:
+            print("PHASE_2_MOUNT_FAILURE",json.dumps([c.d for c in first]),flush=True)
             raise RuntimeError("phase 2 failed to admit all 8 initial connections")
         print("PHASE_2_IDLE_8_CONNECTED",flush=True)
         await asyncio.sleep(args.idle_seconds)
