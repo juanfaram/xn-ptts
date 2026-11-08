@@ -24,20 +24,46 @@ async def sample_cpu(stop,output):
     return rows
 
 async def probe(url,i,timeout):
+    """Use a raw *valid* WS upgrade to preserve HTTP status/body even if the
+    WebSocket library classifies non-101 replies as handshake errors."""
+    from urllib.parse import urlsplit
+    import base64,os
+    u=urlsplit(url)
     start=time.perf_counter()
+    writer=None
     try:
         async with asyncio.timeout(timeout):
-            async with connect(url,open_timeout=timeout) as ws:
-                return {"client":i,"status":"admitted","http_status":101,"elapsed_ms":round((time.perf_counter()-start)*1000,3),"body":"","headers":{}}
-    except InvalidStatus as exc:
-        response=exc.response
-        return {"client":i,"status":"rejected","http_status":response.status_code,
-                "elapsed_ms":round((time.perf_counter()-start)*1000,3),
-                "body":str(response.body[:512]) if response.body else "",
-                "headers":dict(response.headers)}
+            reader,writer=await asyncio.open_connection(u.hostname,u.port or 80)
+            key=base64.b64encode(os.urandom(16)).decode()
+            path=u.path or "/"
+            if u.query:path+="?"+u.query
+            req=(f"GET {path} HTTP/1.1\\r\\n"
+                 f"Host: {u.hostname}:{u.port or 80}\\r\\n"
+                 "Upgrade: websocket\\r\\nConnection: Upgrade\\r\\n"
+                 f"Sec-WebSocket-Key: {key}\\r\\nSec-WebSocket-Version: 13\\r\\n\\r\\n")
+            writer.write(req.encode("ascii"));await writer.drain()
+            head=await reader.readuntil(b"\\r\\n\\r\\n")
+            lines=head.decode("iso-8859-1").split("\\r\\n")
+            status=int(lines[0].split()[1])
+            headers={}
+            for line in lines[1:]:
+                if ":" in line:
+                    k,v=line.split(":",1);headers[k.strip().lower()]=v.strip()
+            body=b""
+            if status!=101:
+                n=int(headers.get("content-length","0"))
+                if n:body=await reader.readexactly(min(n,4096))
+            return {"client":i,"status":"rejected" if status!=101 else "admitted",
+                    "http_status":status,"elapsed_ms":round((time.perf_counter()-start)*1000,3),
+                    "body":body.decode("utf-8","replace"),"headers":headers}
     except Exception as exc:
         return {"client":i,"status":"error","http_status":None,
                 "elapsed_ms":round((time.perf_counter()-start)*1000,3),"error":repr(exc)}
+    finally:
+        if writer is not None:
+            writer.close()
+            try:await writer.wait_closed()
+            except Exception:pass
 
 async def speak(ws,i,text,timeout):
     started=time.perf_counter()
@@ -82,7 +108,7 @@ async def main(args):
         await asyncio.sleep(args.idle_seconds)
         late=await asyncio.gather(*(probe(args.url,i+8,args.timeout) for i in range(8)))
         (out.parent/"ws-B-idle-probes.json").write_text(json.dumps(late,indent=2)+"\n")
-        print("B: late admission statuses", [p["http_status"] for p in late],flush=True)
+        print("B: late admission evidence",json.dumps(late,indent=2),flush=True)
         if any(p["http_status"]!=429 for p in late):
             raise RuntimeError("Expected eight HTTP 429 while eight idle connections hold permits")
         stop=asyncio.Event();cpu_task=asyncio.create_task(sample_cpu(stop,out.parent/"ws-B-cpu.csv"))
