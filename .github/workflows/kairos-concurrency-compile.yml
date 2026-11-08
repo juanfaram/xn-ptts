@@ -1,0 +1,28 @@
+name: KAIROS concurrent bench compile-only
+on:
+  push:
+    branches:
+      - 'run/kairos-concurrency-compile'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  compile:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify frozen Gradium source unchanged
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch origin e5110afd3ead725c940b6411eec4985fb8b111aa --depth=1
+          git diff --exit-code e5110afd3ead725c940b6411eec4985fb8b111aa HEAD -- ptts/src ptts/examples/bench.rs ptts/Cargo.toml
+          echo "PINNED_SOURCE_VERIFIED=e5110afd3ead725c940b6411eec4985fb8b111aa"
+          nproc
+          lscpu | grep -E 'Model name|CPU\\(s\\)' | head -5
+          free -m
+      - name: Apply isolated patch
+        run: python3 scripts/kairos_patch_bench.py
+      - name: Compile only, no model execution
+        run: cargo build --release -p ptts --example bench --features hf
