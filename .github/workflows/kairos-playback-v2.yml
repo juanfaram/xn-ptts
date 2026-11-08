@@ -1,0 +1,34 @@
+name: KAIROS playback v2 synthetic validation
+on:
+  push:
+    branches: ['run/kairos-playback-v2-frozen']
+    paths:
+      - 'scripts/kairos_playback_v2.py'
+      - 'scripts/test_kairos_playback_v2.py'
+      - '.github/workflows/kairos-playback-v2.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  validate:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Validate synthetic cases and freeze analyzer identity
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p out/playback-v2
+          python3 -m unittest discover -s scripts -p test_kairos_playback_v2.py -v 2>&1 | tee out/playback-v2/tests.log
+          sha256sum scripts/kairos_playback_v2.py scripts/test_kairos_playback_v2.py > out/playback-v2/source-sha256.txt
+          git rev-parse HEAD > out/playback-v2/commit.txt
+      - name: Upload audit proof
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: kairos-playback-v2-tests
+          path: out/playback-v2/
+          retention-days: 30
