@@ -1,0 +1,101 @@
+name: KAIROS k1 determinism then k2 validation
+on:
+  push:
+    branches: ['run/kairos-concurrency-compile']
+    paths:
+      - '.github/workflows/kairos-k2.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  validate:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - name: Audit environment and pinned source
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p out
+          git fetch origin e5110afd3ead725c940b6411eec4985fb8b111aa --depth=1
+          git diff --exit-code e5110afd3ead725c940b6411eec4985fb8b111aa HEAD -- ptts/src ptts/examples/bench.rs ptts/Cargo.toml
+          { git rev-parse HEAD; git log --oneline -3; git diff --stat e5110afd3ead725c940b6411eec4985fb8b111aa; nproc; lscpu; free -m; } > out/env.txt
+          git diff e5110afd3ead725c940b6411eec4985fb8b111aa HEAD > out/patch.diff
+      - name: Mutation test of checker
+        run: python3 scripts/check.py --self-test
+      - name: Apply isolated patch and compile
+        run: |
+          python3 scripts/kairos_patch_bench.py
+          cargo build --release -p ptts --example bench --features hf
+      - name: Download published model
+        run: |
+          python3 -m pip install --user huggingface_hub
+          python3 - <<'PY'
+          from huggingface_hub import snapshot_download
+          snapshot_download(repo_id="gradium/phonon-31m-en",local_dir="phonon-model")
+          PY
+          find phonon-model -type f | sort > out/model-files.txt
+          python3 - <<'PY'
+          import json,pathlib
+          root=pathlib.Path("phonon-model")
+          cfg=json.loads((root/"config.json").read_text())
+          voice=next((v["name"] for v in cfg.get("voices",[]) if v.get("name")),None)
+          if not voice:
+              candidates=[root/"default-voice.safetensors"]+sorted((root/"voices").glob("*.safetensors"))+sorted((root/"embeddings").glob("*.safetensors"))
+              voice=next((str(p) for p in candidates if p.is_file()),None)
+          if not voice: raise SystemExit("No model voice found")
+          pathlib.Path("out/voice.txt").write_text(voice)
+          print("Selected voice:",voice)
+          PY
+      - name: k1 two independent reference runs
+        shell: bash
+        run: |
+          set -euo pipefail
+          VOICE="$(cat out/voice.txt)"
+          for R in 1 2; do
+            mkdir -p "out/k1_r$R"
+            ./target/release/examples/bench --model phonon-model/model.safetensors --config phonon-model/config.json --voice "$VOICE" --lang en --cpu --threads "$(nproc)" --seed 42 --concurrency 1 --repeats 1 --warmup 0 --events-csv "out/k1_r$R/flows.csv" 2>&1 | tee "out/k1_r$R/run.log"
+            python3 scripts/check.py "out/k1_r$R/flows.csv"
+          done
+      - name: Compare k1 audio hashes (fail closed)
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import csv
+          def hashes(p):
+              with open(p,newline="") as f: return {r["flow"]:r["sha256"] for r in csv.DictReader(f)}
+          a=hashes("out/k1_r1/flows.csv");b=hashes("out/k1_r2/flows.csv")
+          print("k1 reference:",a,"k1 repeat:",b)
+          if a!=b: raise SystemExit("k1 NONDETERMINISTIC: no k2 run; inspect f32le audio for tolerance")
+          print("k1 deterministic f32 sample hash PASS")
+          PY
+      - name: k2 one concurrent validation wave
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p out/k2
+          VOICE="$(cat out/voice.txt)"
+          ./target/release/examples/bench --model phonon-model/model.safetensors --config phonon-model/config.json --voice "$VOICE" --lang en --cpu --threads "$(nproc)" --seed 42 --concurrency 2 --repeats 1 --warmup 0 --events-csv out/k2/flows.csv 2>&1 | tee out/k2/run.log
+          python3 scripts/check.py out/k2/flows.csv
+      - name: Compare k2 audio hashes to k1 reference
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import csv
+          def hashes(p):
+              with open(p,newline="") as f:return {r["flow"]:r["sha256"] for r in csv.DictReader(f)}
+          baseline=next(iter(hashes("out/k1_r1/flows.csv").values()))
+          k2=hashes("out/k2/flows.csv")
+          print("baseline:",baseline,"k2:",k2)
+          if len(k2)!=2 or any(h!=baseline for h in k2.values()):
+              raise SystemExit("k2 hash mismatch against k1; report, do not silently retry")
+          print("k2 identity PASS")
+          PY
+      - name: Upload evidence even if a check fails
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: kairos-k2-validation-evidence
+          path: out/
+          retention-days: 30
