@@ -53,7 +53,13 @@ async def stream(url,flow,barrier,timeout):
                     if m.get("type")=="flushed" and m.get("flush_id")==flow+1:break
                 if not chunks:raise RuntimeError("empty audio")
                 ratios=[(chunks[j][0]-chunks[j-1][0])/chunks[j-1][1] for j in range(1,len(chunks))]
-                for j in range(1,len(fragment_rows)):\n                    interval=(fragment_rows[j]["ts_recv_monotonic_s"]-fragment_rows[j-1]["ts_recv_monotonic_s"])*1000\n                    fragment_rows[j]["inter_ms"]=round(interval,4)\n                    fragment_rows[j]["margin_ratio"]=round(interval/fragment_rows[j-1]["frag_ms"],5)\n                    fragment_rows[j]["gap"]=interval>fragment_rows[j-1]["frag_ms"]\n                fragment_rows[0].update({"inter_ms":None,"margin_ratio":None,"gap":False})\n                return {"flow":flow,"status":"ok","ttfa_ms":round((chunks[0][0]-t0)*1000,3),
+                for j in range(1,len(fragment_rows)):
+                    interval=(fragment_rows[j]["ts_recv_monotonic_s"]-fragment_rows[j-1]["ts_recv_monotonic_s"])*1000
+                    fragment_rows[j]["inter_ms"]=round(interval,4)
+                    fragment_rows[j]["margin_ratio"]=round(interval/fragment_rows[j-1]["frag_ms"],5)
+                    fragment_rows[j]["gap"]=interval>fragment_rows[j-1]["frag_ms"]
+                fragment_rows[0].update({"inter_ms":None,"margin_ratio":None,"gap":False})
+                return {"flow":flow,"status":"ok","ttfa_ms":round((chunks[0][0]-t0)*1000,3),
                         "audio_seconds":round(sum(d for _,d in chunks),4),"chunks":len(chunks),
                         "gaps":sum(r>1 for r in ratios),
                         "worst_ratio":round(max(ratios),5) if ratios else 0,
