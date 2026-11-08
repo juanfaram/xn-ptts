@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Fail closed on late audio chunks. Inter-arrival gaps are compared to the
 PREVIOUS fragment's playback duration (not the current fragment).
-This is a strict gap proxy, not a simulated playout-buffer underrun."""
+This is a strict gap proxy, not a simulated playout-buffer delivery_gap."""
 import argparse
 import csv
 import glob
@@ -39,7 +39,7 @@ def check(paths):
                     if gap_ms > deadline_ms:
                         violations.append((path,key,idx,gap_ms,deadline_ms))
     for path,key,idx,gap,deadline in violations:
-        print(f"UNDERRUN_PROXY {path} wave/flow={key} chunk={idx} gap={gap:.3f}ms previous_frag={deadline:.3f}ms",file=sys.stderr)
+        print(f"DELIVERY_GAP {path} wave/flow={key} chunk={idx} gap={gap:.3f}ms previous_frag={deadline:.3f}ms",file=sys.stderr)
     print(f"Checked {count} inter-fragment gaps; violations={len(violations)}")
     return 1 if violations else 0
 
