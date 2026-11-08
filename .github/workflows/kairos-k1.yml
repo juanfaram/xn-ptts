@@ -31,7 +31,7 @@ jobs:
           } | tee kairos-results/environment.log
           test "$(git rev-parse HEAD)" = "e5110afd3ead725c940b6411eec4985fb8b111aa"
       - name: Build official benchmark
-        run: cargo build --release -p ptts --example bench
+        run: cargo build --release -p ptts --example bench --features hf
       - name: Download public Phonon 31m model
         shell: bash
         run: |
