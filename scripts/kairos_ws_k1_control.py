@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
-"""KAIROS: original server-only capacity sweep. Three waves per k.
-Transport delivery_gap proxy, not audible underrun. Do not call a sample p99
-a population tail. Save all failed waves and stop at 2/3 failures."""
+"""KAIROS: original server-only capacity sweep; five measured repetitions by default.
+Transport delivery_gap proxy, not audible underrun; sample p99 is unstable."""
 import argparse, asyncio, base64, csv, hashlib, json, math, os, statistics, time
 from array import array
 from pathlib import Path
@@ -98,6 +97,8 @@ async def main(args):
     if not args.url.startswith(("ws://127.0.0.1:","ws://localhost:")):
         raise SystemExit("Only local server tests permitted")
     args.output.mkdir(parents=True,exist_ok=True)
+    global TEXT
+    TEXT = args.text
     # A separate sequential k1 reference is taken on the SAME server and same run.
     gate=asyncio.Barrier(1)
     ref=await stream(args.url,0,gate,args.timeout)
@@ -108,11 +109,13 @@ async def main(args):
     summary=[];all_rows=[];last_clean=None;gap_map={}
     for k in range(args.start,args.end+1):
         failures=0
-        for rep in range(1,6):
+        for rep in range(1,args.repeats+1):
             rows,_=await wave(args,k,rep,reference)
             details=json.loads((args.output/f"k{k}-r{rep}-ratios.json").read_text())
             gap_map[f"k{k}-r{rep}"]=[d["gap_indices"] for d in details]
             all_rows.extend(rows)
+            if args.dry_run and any(r["status"]!="ok" or not r.get("chunks") for r in rows):
+                raise RuntimeError("Dry-run failed to produce audio")
             ok=(len(rows)==k and all(
                 r["status"]=="ok" and r["gaps"]==0 and r["worst_ratio"]<=1
                 and r["ttfa_ms"]<=200 and r["max_abs_lsb"] is not None
@@ -121,8 +124,8 @@ async def main(args):
             print(f"k={k} repeat={rep} pass={ok} failures={failures} TTFA={[r.get('ttfa_ms') for r in rows]} gaps={[r.get('gaps') for r in rows]}",flush=True)
             with (args.output/"flows.csv").open("w",newline="") as f:
                 w=csv.DictWriter(f,fieldnames=FIELDS,extrasaction="ignore");w.writeheader();w.writerows(all_rows)
-        summary.append({"k":k,"passes":5-failures,"failures":failures,
-                        "status":"PASS_5_OF_5" if failures==0 else "FAIL_2_OF_5" if failures>=2 else "INCONCLUSIVE",
+        summary.append({"k":k,"passes":args.repeats-failures,"failures":failures,
+                        "status":"PASS_ALL" if failures==0 else "FAIL_2_PLUS" if failures>=2 else "INCONCLUSIVE",
                         "ttfa_sample_p99_ms":percentile([r["ttfa_ms"] for r in all_rows if r["k"]==k and r["status"]=="ok"],.99),
                         "max_delivery_gap_ratio":max((r["worst_ratio"] for r in all_rows if r["k"]==k and r["status"]=="ok"),default=None),
                         "max_rss_mib":max((r["memory_rss_mib"] for r in all_rows if r["k"]==k and r["memory_rss_mib"] is not None),default=None)})
@@ -141,7 +144,7 @@ async def main(args):
     while dest.exists():
         dest = args.output/f"summary.{version}.json"
         version += 1
-    dest.write_text(json.dumps(report,indent=2)+"\\n")
+    dest.write_text(json.dumps(report,indent=2)+"\n")
 
 if __name__=="__main__":
     p=argparse.ArgumentParser()
@@ -150,7 +153,13 @@ if __name__=="__main__":
     p.add_argument("--start",type=int,default=2)
     p.add_argument("--end",type=int,default=6)
     p.add_argument("--timeout",type=float,default=120)
+    p.add_argument("--repeats",type=int,default=5)
+    p.add_argument("--dry-run",action="store_true")
+    p.add_argument("--text",default=TEXT)
     p.add_argument("--output",type=Path,default=Path("out/sweep"))
     args=p.parse_args()
     if not 1<=args.start<=args.end<=8:p.error("k must be 1..8")
+    if not 1<=args.repeats<=100:p.error("repeats must be 1..100")
+    if args.dry_run and (args.start!=1 or args.end!=1 or args.repeats!=1):
+        p.error("dry-run requires --start 1 --end 1 --repeats 1")
     asyncio.run(main(args))
