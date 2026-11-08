@@ -4,6 +4,7 @@ on:
     branches: ['run/kairos-ws-control']
     paths:
       - '.github/workflows/kairos-ws-B.yml'
+      - 'scripts/kairos_ws_idle_B.py'
   workflow_dispatch:
 permissions:
   contents: read
@@ -21,7 +22,7 @@ jobs:
           git fetch origin e5110afd3ead725c940b6411eec4985fb8b111aa --depth=1
           git diff --exit-code e5110afd3ead725c940b6411eec4985fb8b111aa HEAD -- ptts/src ptts-ws-server/src ptts-ws-server/Cargo.toml
           { git rev-parse HEAD; git log --oneline -3; git diff --stat e5110afd3ead725c940b6411eec4985fb8b111aa; nproc; lscpu; free -m; } > out/env.txt
-          python3 -m py_compile scripts/kairos_ws_load.py
+          python3 -m py_compile scripts/kairos_ws_load.py scripts/kairos_ws_idle_B.py
       - name: Download public checkpoint
         run: |
           python3 -m pip install --user huggingface_hub 'websockets>=13,<17'
@@ -52,7 +53,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          python3 scripts/kairos_ws_load.py --arm B-connection-permit --limit 8 --sessions 10 --idle-seconds 2 --timeout 120 --output out/ws-B-m8.csv | tee out/ws-B-summary.log
+          python3 scripts/kairos_ws_idle_B.py --idle-seconds 30 --timeout 120 --output out/ws-B-summary.json | tee out/ws-B-run.log
       - name: Upload audit evidence even on failure
         if: always()
         uses: actions/upload-artifact@v4
