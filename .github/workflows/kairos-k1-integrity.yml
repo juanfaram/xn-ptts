@@ -23,7 +23,12 @@ jobs:
           git fetch origin e5110afd3ead725c940b6411eec4985fb8b111aa --depth=1
           git diff --exit-code e5110afd3ead725c940b6411eec4985fb8b111aa HEAD -- ptts/src ptts-ws-server/src ptts-ws-server/Cargo.toml
           { git rev-parse HEAD; git log --oneline -3; nproc; lscpu; free -m; } > out/k1-integrity/env.txt
-          python3 -m py_compile scripts/kairos_ws_k1_control.py
+          python3 - <<'PY'
+          import pathlib, py_compile
+          for p in sorted(pathlib.Path("scripts").glob("kairos*.py")):
+              py_compile.compile(str(p), doraise=True)
+              print("Compiled:", p)
+          PY
       - name: Download model and dependencies
         shell: bash
         run: |
@@ -52,6 +57,18 @@ jobs:
               except OSError:time.sleep(1)
           else:raise SystemExit("server did not start")
           PY
+      - name: K1 one-wave dry-run (must pass before full measurement)
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 scripts/kairos_ws_k1_control.py --pid "$(cat out/k1-integrity/server.pid)" --start 1 --end 1 --repeats 1 --dry-run --text "Hello." --output out/k1-integrity/dry-run | tee out/k1-integrity/dry-run.log
+          python3 - <<'PY'
+          import csv, pathlib
+          p=pathlib.Path("out/k1-integrity/dry-run/flows.csv")
+          rows=list(csv.DictReader(p.open()))
+          assert len(rows)==1 and rows[0]["status"]=="ok" and int(rows[0]["chunks"])>0, rows
+          print("Dry-run transport and audio: OK")
+          PY
       - name: K1 five waves and fragment positions
         shell: bash
         run: |
@@ -68,9 +85,9 @@ jobs:
           import hashlib,json,pathlib
           p=pathlib.Path('out/k1-integrity')
           items={}
-          for f in sorted(p.iterdir()):
+          for f in sorted(p.rglob('*')):
               if f.is_file() and f.name!='manifest.json':
-                  items[f.name]=hashlib.sha256(f.read_bytes()).hexdigest()
+                  items[str(f.relative_to(p))]=hashlib.sha256(f.read_bytes()).hexdigest()
           (p/'manifest.json').write_text(json.dumps({'sha256_files':items,'meaning':'Evidence integrity only; does not certify clean delivery'},indent=2)+'\\n')
           PY
       - name: Upload evidence even on failure
