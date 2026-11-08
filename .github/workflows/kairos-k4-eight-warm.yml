@@ -1,0 +1,98 @@
+name: KAIROS k4 eight measured warmup
+on:
+  push:
+    branches: ['run/kairos-k4-eight-warm']
+    paths: ['.github/workflows/kairos-k4-eight-warm.yml', 'scripts/kairos_ws_k2_eight.py']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  sweep:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Frozen source and environment audit
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p out/k4-eight
+          git fetch origin e5110afd3ead725c940b6411eec4985fb8b111aa --depth=1
+          git diff --exit-code e5110afd3ead725c940b6411eec4985fb8b111aa HEAD -- ptts/src ptts-ws-server/src ptts-ws-server/Cargo.toml
+          { git rev-parse HEAD; git log --oneline -3; nproc; lscpu; free -m; } > out/k4-eight/env.txt
+          python3 -m py_compile scripts/kairos_ws_k2_eight.py
+      - name: Download model and dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m pip install --user huggingface_hub 'websockets>=13,<17'
+          python3 - <<'PY'
+          from huggingface_hub import snapshot_download
+          snapshot_download(repo_id="gradium/phonon-31m-en",local_dir="phonon-model")
+          PY
+          find phonon-model -type f | sort > out/k4-eight/model-files.txt
+      - name: Compile original server
+        run: cargo build --release -p ptts-ws-server
+      - name: Start original WS server m8
+        shell: bash
+        run: |
+          set -euo pipefail
+          RUST_LOG=info ./target/release/ptts-ws-server --model phonon-model --voice-catalog '' --lang en --device cpu --max-concurrent-requests 8 --addr 127.0.0.1:8080 > out/k4-eight/server.log 2>&1 &
+          echo $! > out/k4-eight/server.pid
+          python3 - <<'PY'
+          import socket,time,subprocess
+          for i in range(120):
+              if subprocess.run(["kill","-0",open("out/k4-eight/server.pid").read().strip()],capture_output=True).returncode:
+                  raise SystemExit("server exited")
+              try:
+                  s=socket.create_connection(("127.0.0.1",8080),timeout=1);s.close();break
+              except OSError:time.sleep(1)
+          else:raise SystemExit("server did not start")
+          PY
+      - name: K4 warmup plus eight measured waves
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 scripts/kairos_ws_k2_eight.py --pid "$(cat out/k4-eight/server.pid)" --start 4 --end 4 --output out/k4-eight | tee out/k4-eight/run.log
+      - name: Hash source binary and all evidence
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p out/k4-eight
+          { git rev-parse HEAD; sha256sum scripts/kairos_ws_k2_eight.py; sha256sum target/release/ptts-ws-server || true; } > out/k4-eight/build-identity.txt
+          python3 - <<'PY'
+          import hashlib,json,pathlib
+          p=pathlib.Path('out/k4-eight')
+          items={}
+          for f in sorted(p.iterdir()):
+              if f.is_file() and f.name!='manifest.json':
+                  items[f.name]=hashlib.sha256(f.read_bytes()).hexdigest()
+          (p/'manifest.json').write_text(json.dumps({'sha256_files':items,'meaning':'Evidence integrity only; does not certify clean delivery'},indent=2)+'\n')
+          PY
+      - name: Audit k4 using frozen playback v2
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m unittest discover -s scripts -p test_kairos_playback_v2.py -v
+          python3 - <<'PY'
+          from pathlib import Path
+          from zipfile import ZipFile,ZIP_DEFLATED
+          root=Path('out/k4-eight')
+          with ZipFile('k4-evidence.zip','w',ZIP_DEFLATED) as z:
+              for p in root.iterdir():
+                  if p.is_file():z.write(p,p.name)
+          PY
+          python3 scripts/kairos_playback_v2.py k4-evidence.zip --output out/k4-eight/playback-v2-result.json
+          sha256sum scripts/kairos_playback_v2.py > out/k4-eight/analyzer-sha256.txt
+          python3 scripts/kairos_m0_m1_compare.py k4-evidence.zip out/k4-eight/M0-M1.json
+      - name: Upload evidence even on failure
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: kairos-k4-eight-warm-evidence
+          path: out/k4-eight/
+          retention-days: 30
