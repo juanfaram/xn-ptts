@@ -41,8 +41,8 @@ def check_deadline(rows):
 
 def self_test():
     import io
-    header = "phase,flow,interval_ns,chunk_dur_ms\\n"
-    bad = header + "measured,0,,20\\nmeasured,0,30000000,20\\n"
+    header = "phase,flow,interval_ns,chunk_dur_ms\n"
+    bad = header + "measured,0,,20\nmeasured,0,30000000,20\n"
     rows = list(csv.DictReader(io.StringIO(bad)))
     try:
         check_deadline(rows)
