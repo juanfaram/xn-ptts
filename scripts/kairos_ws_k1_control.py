@@ -105,11 +105,13 @@ async def main(args):
     (args.output/"reference.json").write_text(json.dumps(ref,indent=2)+"\n")
     if reference is None:raise RuntimeError("k1 reference failed")
     (args.output/"reference.pcm16.sha256").write_text(hashlib.sha256(reference).hexdigest()+"\n")
-    summary=[];all_rows=[];last_clean=None
+    summary=[];all_rows=[];last_clean=None;gap_map={}
     for k in range(args.start,args.end+1):
         failures=0
         for rep in range(1,6):
             rows,_=await wave(args,k,rep,reference)
+            details=json.loads((args.output/f"k{k}-r{rep}-ratios.json").read_text())
+            gap_map[f"k{k}-r{rep}"]=[d["gap_indices"] for d in details]
             all_rows.extend(rows)
             ok=(len(rows)==k and all(
                 r["status"]=="ok" and r["gaps"]==0 and r["worst_ratio"]<=1
@@ -124,7 +126,7 @@ async def main(args):
                         "ttfa_sample_p99_ms":percentile([r["ttfa_ms"] for r in all_rows if r["k"]==k and r["status"]=="ok"],.99),
                         "max_delivery_gap_ratio":max((r["worst_ratio"] for r in all_rows if r["k"]==k and r["status"]=="ok"),default=None),
                         "max_rss_mib":max((r["memory_rss_mib"] for r in all_rows if r["k"]==k and r["memory_rss_mib"] is not None),default=None)})
-        (args.output/"summary.json").write_text(json.dumps({"last_certified_k":last_clean,"levels":summary,"note":"3 waves, not stable p99; strict gap proxy; no admission queue measured"},indent=2)+"\n")
+        (args.output/"summary.json").write_text(json.dumps({"last_certified_k":last_clean,"levels":summary,"gap_positions_by_wave":gap_map,"note":"5 waves; sample p99 is unstable; gap proxy, not audible underrun; no admission queue measured"},indent=2)+"\n")
         if failures==0:last_clean=k
         if failures>=2:
             print(f"STOP: first reproducible failure at k={k}; last clean={last_clean}",flush=True)
