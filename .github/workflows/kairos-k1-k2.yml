@@ -50,6 +50,11 @@ jobs:
           from huggingface_hub import snapshot_download
           print(snapshot_download(repo_id="gradium/phonon-31m-en",local_dir="phonon-model"))
           PY
+      - name: Verify deadline detector catches injected violation
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 scripts/kairos_validate_k2.py --self-test | tee out/validator-selftest.log
       - name: Two patched k1 reference runs then one k2
         shell: bash
         run: |
