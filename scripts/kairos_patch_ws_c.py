@@ -35,7 +35,7 @@ replace("    let seed = app.seed_base ^ (stream_id as u64).wrapping_mul(0x9E3779
     let old = WAITING.fetch_add(1, Ordering::SeqCst);
     if old >= MAX_WAITING {
         WAITING.fetch_sub(1, Ordering::SeqCst);
-        send_error(reply_tx, 429, "generation queue full; retry after 80ms".into()).await?;
+        send_error(reply_tx, 429, serde_json::json!({"reason":"generation_queue_full","retry_after_ms":80,"retryable":true}).to_string()).await?;
         return Ok(());
     }
     let waiting_guard = WaitingGuard;
@@ -43,7 +43,7 @@ replace("    let seed = app.seed_base ^ (stream_id as u64).wrapping_mul(0x9E3779
     let permit = match tokio::time::timeout(ADMISSION_TIMEOUT, app.requests.clone().acquire_owned()).await {
         Ok(Ok(p)) => p,
         _ => {
-            send_error(reply_tx, 429, "generation admission timeout; retry after 80ms".into()).await?;
+            send_error(reply_tx, 429, serde_json::json!({"reason":"generation_admission_timeout","retry_after_ms":80,"retryable":true}).to_string()).await?;
             return Ok(());
         }
     };
