@@ -1,0 +1,78 @@
+name: KAIROS pinned k1 reference then k2 smoke
+on:
+  push:
+    branches:
+      - 'run/kairos-k1-k2'
+permissions:
+  contents: read
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify original source and apply isolated patch
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch origin e5110afd3ead725c940b6411eec4985fb8b111aa --depth=1
+          git diff --exit-code e5110afd3ead725c940b6411eec4985fb8b111aa HEAD -- ptts/src ptts/examples/bench.rs ptts/Cargo.toml
+          python3 scripts/kairos_patch_bench.py
+      - name: Compile concurrent example
+        run: cargo build --release -p ptts --example bench --features hf
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: kairos-compiled-bench
+          path: target/release/examples/bench
+          retention-days: 30
+  run:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: kairos-compiled-bench
+          path: bin
+      - name: Record environment
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p out
+          chmod +x bin/bench
+          { echo "source_sha=e5110afd3ead725c940b6411eec4985fb8b111aa"; echo "workflow_sha=$GITHUB_SHA"; echo "threads=$(nproc)"; lscpu; free -m; } > out/environment.log
+      - name: Download same public Phonon checkpoint
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m pip install --user huggingface_hub
+          python - <<'PY'
+          from huggingface_hub import snapshot_download
+          print(snapshot_download(repo_id="gradium/phonon-31m-en",local_dir="phonon-model"))
+          PY
+      - name: Two patched k1 reference runs then one k2
+        shell: bash
+        run: |
+          set -euo pipefail
+          ARGS=(--model phonon-model/model.safetensors --config phonon-model/config.json --voice phonon-model/default-voice.safetensors --lang en --cpu --threads "$(nproc)" --seed 42 --warmup 1 --repeats 1)
+          mkdir -p out/k1a out/k1b out/k2
+          bin/bench "${ARGS[@]}" --concurrency 1 --events-csv out/k1a/flows.csv 2>&1 | tee out/k1a/run.log
+          bin/bench "${ARGS[@]}" --concurrency 1 --events-csv out/k1b/flows.csv 2>&1 | tee out/k1b/run.log
+          python3 - <<'PY'
+          from pathlib import Path
+          import hashlib
+          a=Path('out/k1a/audio_w1_f0.f32le').read_bytes()
+          b=Path('out/k1b/audio_w1_f0.f32le').read_bytes()
+          print('K1_HASH_A',hashlib.sha256(a).hexdigest())
+          print('K1_HASH_B',hashlib.sha256(b).hexdigest())
+          print('K1_DETERMINISTIC',a==b)
+          PY
+          bin/bench "${ARGS[@]}" --concurrency 2 --events-csv out/k2/flows.csv 2>&1 | tee out/k2/run.log
+          python3 scripts/kairos_validate_k2.py 2>&1 | tee out/validation.log
+      - name: Preserve all evidence even if k2 fails
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: kairos-k1-k2-evidence
+          path: out/
+          retention-days: 30
