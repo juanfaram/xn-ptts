@@ -28,7 +28,7 @@ once("fn bench_synth(args: &Args, normalize: Normalize, quant: Quant) -> Result<
     anyhow::ensure!(args.concurrency >= 1 && args.repeats >= 1, "invalid k/repeats");
     let path = args.events_csv.as_ref().context("--events-csv required")?;
     let mut out = std::io::BufWriter::new(std::fs::File::create(path)?);
-    writeln!(out, "wave,phase,k,flow,chunk,arrival_ns,interval_ns,samples,ttfa_ns,sha256")?;
+    writeln!(out, "wave,phase,k,flow,chunk,arrival_ns,interval_ns,samples,chunk_dur_ms,ttfa_ns,sha256")?;
     let opts = SpeechOptions::default().seed(args.seed);
     for wave in 0..(args.warmup + args.repeats) {
         let barrier = Arc::new(Barrier::new(args.concurrency + 1));
@@ -43,15 +43,20 @@ once("fn bench_synth(args: &Args, normalize: Normalize, quant: Quant) -> Result<
                     let start = Instant::now();
                     let mut chunks = Vec::new();
                     let mut hasher = Sha256::new();
+                    let mut raw_pcm = Vec::<u8>::new();
                     for pcm in tts.stream_with(&args.input, options)? {
                         let pcm = pcm?;
                         if pcm.is_empty() { continue; }
                         let at = start.elapsed().as_nanos();
-                        for x in &pcm { hasher.update(x.to_bits().to_le_bytes()); }
+                        for x in &pcm {
+                            let bytes = x.to_le_bytes();
+                            hasher.update(bytes);
+                            raw_pcm.extend_from_slice(&bytes);
+                        }
                         chunks.push((at, pcm.len()));
                     }
                     anyhow::ensure!(!chunks.is_empty(), "empty stream");
-                    Ok((flow, chunks, format!("{:x}", hasher.finalize())))
+                    Ok((flow, chunks, format!("{:x}", hasher.finalize()), raw_pcm))
                 }));
             }
             barrier.wait();
@@ -60,15 +65,21 @@ once("fn bench_synth(args: &Args, normalize: Normalize, quant: Quant) -> Result<
             }
             Ok(())
         })?;
-        for (flow, chunks, hash) in results {
+        for (flow, chunks, hash, raw_pcm) in results {
+            let parent = path.parent().unwrap_or(std::path::Path::new("."));
+            let audio_path = parent.join(format!("audio_w{}_f{}.f32le", wave, flow));
+            std::fs::write(&audio_path, raw_pcm)?;
+            let hash_path = parent.join(format!("audio_w{}_f{}.sha256", wave, flow));
+            std::fs::write(hash_path, format!("{}  {}\n", hash, audio_path.display()))?;
             let ttfa = chunks[0].0;
             for (i, (at, samples)) in chunks.iter().enumerate() {
                 let interval = if i == 0 { String::new() } else {
                     (at - chunks[i-1].0).to_string()
                 };
-                writeln!(out, "{},{},{},{},{},{},{},{},{},{}",
+                writeln!(out, "{},{},{},{},{},{},{},{},{:.6},{},{}",
                     wave, if wave < args.warmup {"warmup"} else {"measured"},
-                    args.concurrency, flow, i, at, interval, samples, ttfa, hash)?;
+                    args.concurrency, flow, i, at, interval, samples,
+                    (*samples as f64 * 1000.0 / tts.sample_rate() as f64), ttfa, hash)?;
             }
         }
     }
