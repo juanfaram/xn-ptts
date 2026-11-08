@@ -79,7 +79,7 @@ class Client:
 
 async def main(args):
     results={"schema":"kairos_phased_ws_v1","arm":args.arm,"permits":args.permits,
-             "idle_seconds":args.idle_seconds,"text":args.text,"active_generators":args.active_generators,"phases":{}}
+             "idle_seconds":args.idle_seconds,"text":args.text,"active_generators":args.active_generators,"total_sessions":args.total_sessions,"phases":{}}
     all_clients=[]
     async def connect(i):
         c=Client(i,args.url);all_clients.append(c)
@@ -101,7 +101,7 @@ async def main(args):
             raise RuntimeError("phase 2 failed to admit all initial connections")
         print("PHASE_2_IDLE_CONNECTED",args.occupancy,flush=True)
         await asyncio.sleep(args.idle_seconds)
-        second=await asyncio.gather(*(connect(i) for i in range(args.occupancy,16)))
+        second=await asyncio.gather(*(connect(i) for i in range(args.occupancy,args.total_sessions)))
         results["phases"]["wave"]={"accepted":sum(c.d["accepted"] for c in second),
              "http_429":sum(c.d["http_status"]==429 for c in second),
              "clients":[c.d.copy() for c in second]}
@@ -129,7 +129,7 @@ async def main(args):
             "ttfa_request_ms":late.d.get("ttfa_request_ms"),
             "http_status":late.d["http_status"]}),flush=True)
         if args.arm=="B":
-            expected=16-args.occupancy
+            expected=args.total_sessions-args.occupancy
             if results["phases"]["wave"]["http_429"]!=expected:
                 raise RuntimeError(f"INVALID_B_MOUNT: expected {expected} HTTP429 in phase 3")
         if active_at_late==0:
@@ -152,11 +152,12 @@ if __name__=="__main__":
     p.add_argument("--permits",type=int,default=8)
     p.add_argument("--idle-seconds",type=float,default=30)
     p.add_argument("--occupancy",type=int,default=8)
+    p.add_argument("--total-sessions",type=int,default=16)
     p.add_argument("--active-generators",type=int,default=4)
     p.add_argument("--late-delay",type=float,default=0.05)
     p.add_argument("--timeout",type=float,default=180)
     p.add_argument("--text",default="The quick brown fox jumps over the lazy dog.")
     p.add_argument("--output",default="out/ws-phased.json")
     args=p.parse_args()
-    assert 1<=args.active_generators<=args.occupancy<=16
+    assert 1<=args.active_generators<=args.occupancy<=args.total_sessions<=200
     asyncio.run(main(args))
