@@ -33,7 +33,7 @@ jobs:
           from huggingface_hub import snapshot_download
           print(snapshot_download(repo_id="gradium/phonon-31m-en",local_dir="phonon-model"))
           PY
-      - name: Start original WS server with m8 and run 8 clients
+      - name: Start original WS server m8 and run 8 idle + 8 wave + late
         shell: bash
         run: |
           set -euo pipefail
@@ -54,7 +54,7 @@ jobs:
             sleep 1
           done
           if [ "$READY" != 1 ]; then echo 'SERVER_START_TIMEOUT'; tail -100 out/server.log; exit 1; fi
-          python3 scripts/kairos_ws_load.py --clients 8 --idle-seconds 2 --timeout 120 --output out/ws-b-m8.json 2>&1 | tee out/ws-client.log
+          python3 scripts/kairos_ws_phased.py --arm B --permits 8 --idle-seconds 30 --timeout 180 --output out/ws-b-phased.json 2>&1 | tee out/ws-client.log
       - name: Upload all logs even on failure
         if: always()
         uses: actions/upload-artifact@v4
