@@ -23,7 +23,9 @@ jobs:
         run: |
           python3 -m pip install websockets huggingface_hub
           python3 scripts/kairos_ws_selftest.py
-      - name: Apply isolated experimental C patch\n        run: python3 scripts/kairos_patch_ws_c.py\n      - name: Build experimental Phonon WS server
+      - name: Apply isolated experimental C patch
+        run: python3 scripts/kairos_patch_ws_c.py
+      - name: Build experimental Phonon WS server
         env:
           RUSTFLAGS: '-C target-cpu=x86-64'
         run: cargo build --release -p ptts-ws-server
