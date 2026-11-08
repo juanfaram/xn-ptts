@@ -4,6 +4,9 @@ on:
     branches: ['run/kairos-concurrency-compile']
     paths:
       - '.github/workflows/kairos-k2.yml'
+      - 'scripts/kairos_patch_bench.py'
+      - 'scripts/check.py'
+      - 'scripts/compare_audio.py'
   workflow_dispatch:
 permissions:
   contents: read
