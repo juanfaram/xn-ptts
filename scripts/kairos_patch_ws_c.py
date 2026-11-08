@@ -39,6 +39,7 @@ replace("    let seed = app.seed_base ^ (stream_id as u64).wrapping_mul(0x9E3779
         return Ok(());
     }
     let waiting_guard = WaitingGuard;
+    let queue_started = std::time::Instant::now();
     let permit = match tokio::time::timeout(ADMISSION_TIMEOUT, app.requests.clone().acquire_owned()).await {
         Ok(Ok(p)) => p,
         _ => {
@@ -47,6 +48,7 @@ replace("    let seed = app.seed_base ^ (stream_id as u64).wrapping_mul(0x9E3779
         }
     };
     drop(waiting_guard);
+    tracing::info!(stream_id, queue_wait_ms = queue_started.elapsed().as_secs_f64() * 1000.0, "KAIROS_C_GENERATION_ADMITTED");
     let seed = app.seed_base ^ (stream_id as u64).wrapping_mul(0x9E3779B97F4A7C15);""")
 replace("    outcome.and(generated)\n}", "    drop(permit);\n    outcome.and(generated)\n}")
 p.write_text(s)
