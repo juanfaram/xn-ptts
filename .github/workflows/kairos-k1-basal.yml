@@ -1,0 +1,95 @@
+name: KAIROS k1 basal B8 C8 C16 three repeats
+on:
+  push:
+    branches:
+      - 'run/kairos-k1-basal'
+permissions:
+  contents: read
+jobs:
+  compare:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - label: B8-k1
+            arm: B
+            permits: 8
+            occupancy: 8
+            sessions: 8
+            active: 1
+          - label: C8-k1
+            arm: C
+            permits: 6
+            occupancy: 8
+            sessions: 8
+            active: 1
+          - label: C16-k1
+            arm: C
+            permits: 6
+            occupancy: 8
+            sessions: 16
+            active: 1
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify frozen source
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch origin e5110afd3ead725c940b6411eec4985fb8b111aa --depth=1
+          git diff --exit-code e5110afd3ead725c940b6411eec4985fb8b111aa HEAD -- ptts/src ptts-ws-server/src ptts-ws-server/Cargo.toml
+          mkdir -p out
+          { echo "source=e5110afd3ead725c940b6411eec4985fb8b111aa"; echo "experiment_sha=$GITHUB_SHA"; echo "arm=${{ matrix.label }}"; lscpu; free -m; } > out/environment.log
+      - name: Install client and test protocol
+        run: |
+          python3 -m pip install websockets huggingface_hub
+          python3 scripts/kairos_ws_selftest.py
+      - name: Apply experimental C patch only for C
+        if: matrix.arm == 'C'
+        run: python3 scripts/kairos_patch_ws_c.py
+      - name: Build server once
+        env:
+          RUSTFLAGS: '-C target-cpu=x86-64'
+        run: cargo build --release -p ptts-ws-server
+      - name: Download pinned public model
+        run: |
+          python3 - <<'PY'
+          from huggingface_hub import snapshot_download
+          print(snapshot_download(repo_id="gradium/phonon-31m-en",local_dir="phonon-model"))
+          PY
+      - name: Three k1 baseline repeats, restart server every time
+        shell: bash
+        run: |
+          set -euo pipefail
+          for REP in 1 2 3; do
+            RAYON_NUM_THREADS="$(nproc)" ./target/release/ptts-ws-server --addr 127.0.0.1:8080 --model phonon-model --lang en --device cpu --max-concurrent-requests ${{ matrix.permits }} --voice-dir phonon-model > "out/server-rep${REP}.log" 2>&1 &
+            PID=$!
+            trap 'kill "$PID" 2>/dev/null || true' EXIT
+            READY=0
+            for i in $(seq 1 120); do
+              if ! kill -0 "$PID" 2>/dev/null; then echo SERVER_EXITED; tail -80 "out/server-rep${REP}.log";exit 1;fi
+              if python3 - <<'PY'
+          import socket
+          s=socket.socket();s.settimeout(.2)
+          try:s.connect(('127.0.0.1',8080));exit(0)
+          except OSError:exit(1)
+          finally:s.close()
+          PY
+              then READY=1;break;fi
+              sleep 1
+            done
+            if [ "$READY" != 1 ]; then echo SERVER_START_TIMEOUT;exit 1;fi
+            python3 scripts/kairos_ws_phased.py --arm ${{ matrix.arm }} --permits ${{ matrix.permits }} --occupancy ${{ matrix.occupancy }} --total-sessions ${{ matrix.sessions }} --active-generators ${{ matrix.active }} --idle-seconds 30 --timeout 180 --output "out/${{ matrix.label }}-rep${REP}.json" 2>&1 | tee "out/client-rep${REP}.log"
+            kill "$PID" 2>/dev/null || true
+            wait "$PID" 2>/dev/null || true
+            trap - EXIT
+            sleep 2
+          done
+      - name: Preserve evidence even if a repetition fails
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: kairos-policy-${{ matrix.label }}
+          path: out/
+          retention-days: 30
