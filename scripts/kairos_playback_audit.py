@@ -13,7 +13,7 @@ from pathlib import Path
 def audit(archive):
     with zipfile.ZipFile(archive) as z:
         names=set(z.namelist())
-        manifest=json.loads(z.read("manifest.json")) if "manifest.json" in names else None
+        manifest=json.loads(z.read("manifest.json").decode().removesuffix("\\n")) if "manifest.json" in names else None
         manifest_errors=[]
         if manifest:
             for name,expected in manifest.get("sha256_files",{}).items():
