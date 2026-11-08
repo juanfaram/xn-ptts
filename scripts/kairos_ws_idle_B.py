@@ -92,10 +92,11 @@ async def main(args):
             stop.set();samples=await cpu_task
         normalized=[dict(client=i,status="error",error=repr(r)) if isinstance(r,BaseException) else r for i,r in enumerate(results)]
         (out.parent/"ws-B-generation.json").write_text(json.dumps(normalized,indent=2)+"\n")
+        cpu_values=[float(x["cpu_busy_pct"]) for x in samples if x["cpu_busy_pct"]!=""]
         summary={"arm":"B original connection permit","limit":8,"idle_s":args.idle_seconds,
                  "holders":8,"late_probes":8,"late_429":sum(p["http_status"]==429 for p in late),
                  "generators":8,"generators_ok":sum(r["status"]=="ok" for r in normalized),
-                 "cpu_busy_mean_pct":round(sum(float(x["cpu_busy_pct"]) for x in samples if x["cpu_busy_pct"]!="")/len(samples),2) if samples else None,
+                 "cpu_busy_mean_pct":round(sum(cpu_values)/len(cpu_values),2) if cpu_values else None,
                  "warning":"CPU from /proc/stat is runner-wide and not process-isolated; compare C only with matched load and environment"}
         out.write_text(json.dumps(summary,indent=2)+"\n")
         print(json.dumps(summary,indent=2),flush=True)
