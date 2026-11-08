@@ -47,13 +47,28 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          MODEL="$(find phonon-model -type f \( -name '*.safetensors' -o -name '*.gguf' \) | grep -v '/voices/' | head -1)"
-          CONFIG="$(find phonon-model -type f -name config.json | head -1)"
-          VOICE="$(find phonon-model -type f -name '*.safetensors' | grep '/voices/' | head -1 || true)"
+          CONFIG="phonon-model/config.json"
+          MODEL="phonon-model/model.safetensors"
+          test -f "$CONFIG" && test -f "$MODEL"
+          VOICE="$(python - <<'PY'
+          import json, pathlib
+          root = pathlib.Path("phonon-model")
+          config = json.loads((root / "config.json").read_text())
+          baked = config.get("voices", [])
+          if baked:
+              print(baked[0]["name"])
+          else:
+              candidates = [root / "default-voice.safetensors"]
+              candidates += sorted((root / "voices").glob("*.safetensors"))
+              candidates += sorted((root / "embeddings").glob("*.safetensors"))
+              print(next((str(p) for p in candidates if p.is_file()), ""))
+          PY
+          )"
           if [ -z "$VOICE" ]; then
-            echo 'No standalone voice embedding found. Inspect model-files.log; do not invent a voice.' >&2
+            echo 'No baked-in voice or separate embedding found; inspect model-files.log.' >&2
             exit 1
           fi
+          echo "Selected model=$MODEL config=$CONFIG voice=$VOICE" | tee kairos-results/model-selection.log
           for REP in 1 2; do
             ./target/release/examples/bench --model "$MODEL" --config "$CONFIG" --voice "$VOICE" --lang en --cpu --threads "$(nproc)" --seed 42 --iters 10 --warmup 2 --per-iter 2>&1 | tee "kairos-results/k1_rep${REP}.log"
           done
