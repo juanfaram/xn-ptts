@@ -37,13 +37,13 @@ async def probe(url,i,timeout):
             key=base64.b64encode(os.urandom(16)).decode()
             path=u.path or "/"
             if u.query:path+="?"+u.query
-            req=(f"GET {path} HTTP/1.1\\r\\n"
-                 f"Host: {u.hostname}:{u.port or 80}\\r\\n"
-                 "Upgrade: websocket\\r\\nConnection: Upgrade\\r\\n"
-                 f"Sec-WebSocket-Key: {key}\\r\\nSec-WebSocket-Version: 13\\r\\n\\r\\n")
+            req=(f"GET {path} HTTP/1.1\r\n"
+                 f"Host: {u.hostname}:{u.port or 80}\r\n"
+                 "Upgrade: websocket\r\nConnection: Upgrade\r\n"
+                 f"Sec-WebSocket-Key: {key}\r\nSec-WebSocket-Version: 13\r\n\r\n")
             writer.write(req.encode("ascii"));await writer.drain()
-            head=await reader.readuntil(b"\\r\\n\\r\\n")
-            lines=head.decode("iso-8859-1").split("\\r\\n")
+            head=await reader.readuntil(b"\r\n\r\n")
+            lines=head.decode("iso-8859-1").split("\r\n")
             status=int(lines[0].split()[1])
             headers={}
             for line in lines[1:]:
