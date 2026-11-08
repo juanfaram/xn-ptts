@@ -17,7 +17,9 @@ jobs:
           git fetch origin e5110afd3ead725c940b6411eec4985fb8b111aa --depth=1
           git diff --exit-code e5110afd3ead725c940b6411eec4985fb8b111aa HEAD -- ptts/src ptts/examples/bench.rs ptts/Cargo.toml
           python3 scripts/kairos_patch_bench.py
-      - name: Compile concurrent example
+      - name: Compile portable x86-64 concurrent example
+        env:
+          RUSTFLAGS: '-C target-cpu=x86-64'
         run: cargo build --release -p ptts --example bench --features hf
       - uses: actions/upload-artifact@v4
         if: always()
