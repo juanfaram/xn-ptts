@@ -1,0 +1,23 @@
+name: KAIROS analyzer v3 offline tests
+on:
+  push:
+    branches: ['run/kairos-k1-integrity']
+    paths:
+      - 'scripts/kairos_analyzer_v3.py'
+      - '.github/workflows/kairos-analyzer-v3-tests.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  analyzer-tests:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Compile and run synthetic and manifest tests
+        run: |
+          python3 -m py_compile scripts/kairos_analyzer_v3.py
+          python3 scripts/kairos_analyzer_v3.py --test
+          sha256sum scripts/kairos_analyzer_v3.py
