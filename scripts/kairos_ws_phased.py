@@ -110,12 +110,12 @@ async def main(args):
         await asyncio.sleep(args.late_delay)
         active_at_late=sum(not t.done() for t in generators)
         late=await connect(16)
-        if late.d["accepted"]:
-            await late.generate(args.text,args.timeout)
+        late_task=asyncio.create_task(late.generate(args.text,args.timeout)) if late.d["accepted"] else None
         await asyncio.gather(*generators)
         cpu_end=cpu_ticks()
+        if late_task is not None:await late_task
         results["phases"]["load"]={"machine_cpu_busy_fraction_including_harness":cpu_fraction(cpu_start,cpu_end),
-            "cpu_window_ns":now(),"flows":[c.d for c in first]}
+            "cpu_window_end_ns":now(),"flows":[c.d for c in first]}
         results["phases"]["late"]={"active_generators_when_attempted":active_at_late,
             "client":late.d}
         results["phases"]["wave"]["clients"]=[c.d for c in second]
