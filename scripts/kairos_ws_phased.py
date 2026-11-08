@@ -79,7 +79,7 @@ class Client:
 
 async def main(args):
     results={"schema":"kairos_phased_ws_v1","arm":args.arm,"permits":args.permits,
-             "idle_seconds":args.idle_seconds,"text":args.text,"phases":{}}
+             "idle_seconds":args.idle_seconds,"text":args.text,"active_generators":args.active_generators,"phases":{}}
     all_clients=[]
     async def connect(i):
         c=Client(i,args.url);all_clients.append(c)
@@ -95,21 +95,21 @@ async def main(args):
         # Server releases the warmup session slot asynchronously after socket close.
         # Wait for its teardown before starting the exact 8-session occupancy phase.
         await asyncio.sleep(1.0)
-        first=await asyncio.gather(*(connect(i) for i in range(8)))
-        if sum(c.d["accepted"] for c in first)!=8:
+        first=await asyncio.gather(*(connect(i) for i in range(args.occupancy)))
+        if sum(c.d["accepted"] for c in first)!=args.occupancy:
             print("PHASE_2_MOUNT_FAILURE",json.dumps([c.d for c in first]),flush=True)
-            raise RuntimeError("phase 2 failed to admit all 8 initial connections")
-        print("PHASE_2_IDLE_8_CONNECTED",flush=True)
+            raise RuntimeError("phase 2 failed to admit all initial connections")
+        print("PHASE_2_IDLE_CONNECTED",args.occupancy,flush=True)
         await asyncio.sleep(args.idle_seconds)
-        second=await asyncio.gather(*(connect(i) for i in range(8,16)))
+        second=await asyncio.gather(*(connect(i) for i in range(args.occupancy,16)))
         results["phases"]["wave"]={"accepted":sum(c.d["accepted"] for c in second),
              "http_429":sum(c.d["http_status"]==429 for c in second),
              "clients":[c.d.copy() for c in second]}
         print("PHASE_3",json.dumps({"accepted":results["phases"]["wave"]["accepted"],
              "http_429":results["phases"]["wave"]["http_429"]}),flush=True)
-        # The 8 original sessions generate. All second-wave accepted sessions stay idle.
+        # First N accepted sessions generate; other admitted sessions stay idle.
         cpu_start=cpu_ticks()
-        generators=[asyncio.create_task(c.generate(args.text,args.timeout)) for c in first]
+        generators=[asyncio.create_task(c.generate(args.text,args.timeout)) for c in first[:args.active_generators]]
         # Attempt the late client while original 8 are actively generating.
         await asyncio.sleep(args.late_delay)
         active_at_late=sum(not t.done() for t in generators)
@@ -129,8 +129,9 @@ async def main(args):
             "ttfa_request_ms":late.d.get("ttfa_request_ms"),
             "http_status":late.d["http_status"]}),flush=True)
         if args.arm=="B":
-            if results["phases"]["wave"]["http_429"]!=8:
-                raise RuntimeError("INVALID_B_MOUNT: expected 8 HTTP429 in phase 3")
+            expected=16-args.occupancy
+            if results["phases"]["wave"]["http_429"]!=expected:
+                raise RuntimeError(f"INVALID_B_MOUNT: expected {expected} HTTP429 in phase 3")
         if active_at_late==0:
             results["phases"]["late"]["valid_active_overlap"]=False
             print("WARNING: late arrived after generation ended; late measurement invalid",flush=True)
@@ -150,8 +151,12 @@ if __name__=="__main__":
     p.add_argument("--arm",choices=["B","C"],default="B")
     p.add_argument("--permits",type=int,default=8)
     p.add_argument("--idle-seconds",type=float,default=30)
+    p.add_argument("--occupancy",type=int,default=8)
+    p.add_argument("--active-generators",type=int,default=4)
     p.add_argument("--late-delay",type=float,default=0.05)
     p.add_argument("--timeout",type=float,default=180)
     p.add_argument("--text",default="The quick brown fox jumps over the lazy dog.")
     p.add_argument("--output",default="out/ws-phased.json")
-    asyncio.run(main(p.parse_args()))
+    args=p.parse_args()
+    assert 1<=args.active_generators<=args.occupancy<=16
+    asyncio.run(main(args))
