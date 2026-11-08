@@ -72,6 +72,7 @@ once("fn bench_synth(args: &Args, normalize: Normalize, quant: Quant) -> Result<
             let hash_path = parent.join(format!("audio_w{}_f{}.sha256", wave, flow));
             std::fs::write(hash_path, format!("{}  {}\n", hash, audio_path.display()))?;
             let ttfa = chunks[0].0;
+            let sample_rate = tts.sample_rate() as f64;
             for (i, (at, samples)) in chunks.iter().enumerate() {
                 let interval = if i == 0 { String::new() } else {
                     (at - chunks[i-1].0).to_string()
