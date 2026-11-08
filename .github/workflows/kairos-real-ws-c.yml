@@ -39,7 +39,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          RAYON_NUM_THREADS="$(nproc)" ./target/release/ptts-ws-server --addr 127.0.0.1:8080 --model phonon-model --lang en --device cpu --max-concurrent-requests 41 --voice-dir phonon-model > out/server.log 2>&1 &
+          RAYON_NUM_THREADS="$(nproc)" ./target/release/ptts-ws-server --addr 127.0.0.1:8080 --model phonon-model --lang en --device cpu --max-concurrent-requests 6 --voice-dir phonon-model > out/server.log 2>&1 &
           PID=$!
           trap 'kill "$PID" 2>/dev/null || true' EXIT
           READY=0
@@ -56,7 +56,7 @@ jobs:
             sleep 1
           done
           if [ "$READY" != 1 ]; then echo 'SERVER_START_TIMEOUT'; tail -100 out/server.log; exit 1; fi
-          python3 scripts/kairos_ws_phased.py --arm C --permits 41 --idle-seconds 30 --timeout 180 --output out/ws-c-phased.json 2>&1 | tee out/ws-client.log
+          python3 scripts/kairos_ws_phased.py --arm C --permits 6 --idle-seconds 30 --timeout 180 --output out/ws-c-phased.json 2>&1 | tee out/ws-client.log
       - name: Upload all logs even on failure
         if: always()
         uses: actions/upload-artifact@v4
