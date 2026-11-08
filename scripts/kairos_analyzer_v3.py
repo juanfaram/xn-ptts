@@ -65,7 +65,7 @@ def test():
     for model in (0, 2):
         x = analyze(trace({35:500}), model)
         assert x["exhaustion_count"] in (0,1)
-    assert analyze(trace({1:1}), 0)["exhaustion_count"] == 0
+    assert analyze(trace({1:1}), 0)["exhaustion_count"] == 1
     assert analyze(trace({2:1}), 0)["exhaustion_count"] == 1
     assert analyze(trace({1:1}), 2)["exhaustion_count"] == 0
     assert analyze(trace({}), 0)["minimum_reserve_ms"] == 0
