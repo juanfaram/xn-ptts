@@ -1,0 +1,35 @@
+name: KAIROS B-high FIFO proxy tests
+on:
+  push:
+    branches: ['run/kairos-bhigh-fifo-proxy']
+    paths:
+      - 'scripts/kairos_fifo_proxy.py'
+      - 'scripts/test_kairos_fifo_proxy.py'
+      - '.github/workflows/kairos-bhigh-fifo-tests.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  validate:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Validate FIFO proxy with mock WebSocket backend
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p out/fifo
+          python3 -m pip install 'websockets==15.0.1'
+          python3 -m unittest discover -s scripts -p test_kairos_fifo_proxy.py -v 2>&1 | tee out/fifo/tests.log
+          sha256sum scripts/kairos_fifo_proxy.py scripts/test_kairos_fifo_proxy.py > out/fifo/source-sha256.txt
+          git rev-parse HEAD > out/fifo/commit.txt
+      - name: Upload evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: kairos-bhigh-fifo-test-evidence
+          path: out/fifo/
