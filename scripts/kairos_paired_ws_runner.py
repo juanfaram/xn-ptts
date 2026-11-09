@@ -99,10 +99,20 @@ async def run(args):
     def valid_turn(t):
         return t.get("status")=="ok" and t.get("deadline_met") and t.get("fragments_complete")
     valid=sum(valid_turn(t) for t in turns)
+    rejection_counts={"deadline_expired":0,"queue_full":0,"connection_limit":0,"other":0}
+    for session in results:
+        error=str(session.get("connection_error",""))
+        if error and ("429" in error or "rejected" in error.lower()):
+            rejection_counts["connection_limit"]+=1
+        for turn in session["turns"]:
+            message=str(turn.get("error",""))
+            if "deadline_expired" in message:rejection_counts["deadline_expired"]+=1
+            elif "queue_full" in message:rejection_counts["queue_full"]+=1
+            elif "429" in message:rejection_counts["other"]+=1
     valid_sessions=sum(len(x["turns"])==TURNS and all(valid_turn(t) for t in x["turns"]) for x in results)
     return {"arm":args.arm,"activity_pct":args.activity,"repeat":args.repeat,"duration_s":duration,
             "offered":len(turns),"valid_preliminary":valid,"failed":len(turns)-valid,
-            "offered_sessions":SESSIONS,"valid_sessions_preliminary":valid_sessions,
+            "offered_sessions":SESSIONS,"valid_sessions_preliminary":valid_sessions,\n            "rejection_counts":rejection_counts,
             "note":"Preliminary only: full C1-C4 SES certification requires frozen offline analyzer",
             "sessions":results}
 
