@@ -141,6 +141,8 @@ class Proxy:
             async for raw in client:
                 req=json.loads(raw);typ=req.get("type")
                 if typ in ("flush","end_of_stream"):
+                    trace_id=req.pop("kairos_trace_id",None)
+                    t_enqueue_ns=time.monotonic_ns()
                     try:await self.fifo.acquire(req.get("deadline_ms"))
                     except QueueFull:
                         await client.send(json.dumps({"type":"error","code":429,"message":"generation queue full","retry_after_seconds":self.retry_after}))
@@ -148,9 +150,12 @@ class Proxy:
                     except asyncio.TimeoutError:
                         await client.send(json.dumps({"type":"error","code":408,"message":"generation queue deadline exceeded","retry_after_seconds":self.retry_after}))
                         continue
+                    t_admission_ns=time.monotonic_ns()
+                    if trace_id is not None:
+                        print(json.dumps({"event":"admission","trace_id":trace_id,"t_enqueue_ns":t_enqueue_ns,"t_admission_ns":t_admission_ns,"queue_ms":round((t_admission_ns-t_enqueue_ns)/1e6,4),"policy":self.policy}),flush=True)
                     active=True;completion.clear()
                     try:
-                        await backend.send(raw)
+                        await backend.send(json.dumps(req) if trace_id is not None else raw)
                         await completion.wait()
                     finally:
                         if active:
