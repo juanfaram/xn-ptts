@@ -26,6 +26,7 @@ def m1(frags):
         buffer=max(0,buffer-gap)+durations[i]
     return {"episode_count":len(episodes),"total_stall_ms":sum(e["duration_ms"] for e in episodes),"episodes":episodes}
 async def one(ws,session_id,deadline_ms,reference,timeout):
+    if ws is None:return {"session":session_id,"deadline_ms":deadline_ms,"status":"rejected","code":429,"error":"connection not admitted by original server","valid":False}
     start=time.perf_counter()
     try:
         async with asyncio.timeout(timeout):
@@ -82,7 +83,12 @@ async def main(a):
             async with AsyncExitStack() as stack:
                 clients=[]
                 for i in range(a.sessions):
-                    ws=await stack.enter_async_context(connect(a.url,open_timeout=10,max_size=2**23))
+                    try:
+                        ws=await stack.enter_async_context(connect(a.url,open_timeout=10,max_size=2**23))
+                    except Exception:
+                        if not a.allow_admission_rejects:raise
+                        clients.append(None)
+                        continue
                     await ws.send(json.dumps({"type":"setup","json_config":"","model_name":"","output_format":"pcm","voice":None,"voice_id":None,"voice_emb":None}))
                     while True:
                         msg=json.loads(await ws.recv())
@@ -106,6 +112,7 @@ if __name__=="__main__":
     p=argparse.ArgumentParser()
     p.add_argument("--url",default="ws://127.0.0.1:8081/speech/tts")
     p.add_argument("--reference-url",default="ws://127.0.0.1:8080/speech/tts")
+    p.add_argument("--allow-admission-rejects",action="store_true")
     p.add_argument("--short-deadline-ms",type=int,default=240)
     p.add_argument("--long-deadline-ms",type=int,default=1000)
     p.add_argument("--sessions",type=int,default=20)
