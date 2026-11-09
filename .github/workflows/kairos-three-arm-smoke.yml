@@ -1,0 +1,77 @@
+name: KAIROS three-arm real Phonon smoke
+on:
+  push:
+    branches: ['run/kairos-policy-isolation-k23']
+    paths:
+      - 'scripts/kairos_paired_ws_runner.py'
+      - 'scripts/kairos_paired_load.py'
+      - 'scripts/kairos_patch_ws_c.py'
+      - 'scripts/kairos_patch_ws_bhigh_q.py'
+      - '.github/workflows/kairos-three-arm-smoke.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  smoke:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {arm: B, permits: 8}
+          - {arm: Q, permits: 3}
+          - {arm: C, permits: 3}
+    runs-on: ubuntu-22.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: '3.11'}
+      - name: Preflight and frozen source
+        run: |
+          set -euo pipefail
+          mkdir -p out
+          python3 -m py_compile scripts/kairos_paired_load.py scripts/kairos_paired_ws_runner.py scripts/kairos_patch_ws_c.py scripts/kairos_patch_ws_bhigh_q.py
+          python3 scripts/kairos_paired_load.py --test
+          git fetch origin e5110afd3ead725c940b6411eec4985fb8b111aa --depth=1
+          git diff --exit-code e5110afd3ead725c940b6411eec4985fb8b111aa HEAD -- ptts/src ptts-ws-server/src ptts-ws-server/Cargo.toml
+      - name: Apply selected patch
+        shell: bash
+        run: |
+          if [ "${{ matrix.arm }}" = Q ]; then python3 scripts/kairos_patch_ws_bhigh_q.py; fi
+          if [ "${{ matrix.arm }}" = C ]; then python3 scripts/kairos_patch_ws_c.py; fi
+      - name: Compile and freeze binary
+        run: |
+          cargo build --release -p ptts-ws-server
+          sha256sum target/release/ptts-ws-server scripts/kairos_paired_ws_runner.py > out/build-identity.sha256
+          git rev-parse HEAD > out/commit.txt
+      - name: Download public model and WS client
+        run: |
+          python3 -m pip install 'websockets>=13,<17' huggingface_hub
+          python3 - <<'PY'
+          from huggingface_hub import snapshot_download
+          snapshot_download(repo_id="gradium/phonon-31m-en",local_dir="phonon-model")
+          PY
+      - name: Start server and run real PCM warmup
+        shell: bash
+        run: |
+          set -euo pipefail
+          ./target/release/ptts-ws-server --addr 127.0.0.1:8080 --model phonon-model --lang en --device cpu --max-concurrent-requests ${{ matrix.permits }} --voice-dir phonon-model > out/server.log 2>&1 &
+          PID=$!
+          trap 'kill "$PID" 2>/dev/null || true' EXIT
+          python3 - <<'PY'
+          import socket,time
+          for _ in range(120):
+              try:
+                  with socket.create_connection(("127.0.0.1",8080),timeout=1):pass
+                  break
+              except OSError:time.sleep(1)
+          else:raise SystemExit("server did not start")
+          PY
+          python3 scripts/kairos_paired_ws_runner.py --warmup --arm "${{ matrix.arm }}" --activity 10 --repeat 1 --timeout 120 | tee out/smoke.log
+      - name: Preserve evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: kairos-smoke-${{ matrix.arm }}
+          path: out/
+          retention-days: 30
