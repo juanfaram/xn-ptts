@@ -1,0 +1,60 @@
+name: KAIROS strict real Phonon k frontier 1 2 4 8
+on:
+  push:
+    branches: ['run/kairos-m1-preregistered-capture']
+    paths: ['.github/workflows/kairos-strict-k-frontier.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  measure:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 70
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Verify frozen Phonon and scripts
+        run: |
+          set -euo pipefail
+          mkdir -p out/k-frontier
+          git fetch origin e5110afd3ead725c940b6411eec4985fb8b111aa --depth=1
+          git diff --exit-code e5110afd3ead725c940b6411eec4985fb8b111aa HEAD -- ptts/src ptts-ws-server/src ptts-ws-server/Cargo.toml
+          python3 -m py_compile scripts/kairos_multiturn.py scripts/kairos_k_frontier_verdict.py
+          { git rev-parse HEAD; nproc; lscpu; } > out/k-frontier/environment.txt
+      - name: Model and dependencies
+        run: |
+          python3 -m pip install --user huggingface_hub 'websockets>=13,<17'
+          python3 - <<'PY'
+          from huggingface_hub import snapshot_download
+          snapshot_download(repo_id="gradium/phonon-31m-en",local_dir="phonon-model")
+          PY
+      - name: Compile frozen server
+        run: cargo build --release -p ptts-ws-server
+      - name: Start direct server
+        run: |
+          set -euo pipefail
+          ./target/release/ptts-ws-server --model phonon-model --voice-catalog '' --lang en --device cpu --max-concurrent-requests 32 --addr 127.0.0.1:8080 > out/k-frontier/server.log 2>&1 &
+          echo $! > out/k-frontier/server.pid
+          python3 - <<'PY'
+          import socket,time
+          for i in range(120):
+              try:
+                  s=socket.create_connection(("127.0.0.1",8080),timeout=1);s.close();break
+              except OSError:time.sleep(1)
+          else:raise SystemExit("server not ready")
+          PY
+      - name: Measure actual k1 k2 k4 k8 with strict 200ms and virtual M0
+        run: |
+          mkdir -p out/k-frontier/direct32
+          python3 scripts/kairos_multiturn.py --capture-fragments --activities 0.05 0.10 0.20 0.40 --repeats 4 --short-ms 200 --long-ms 200 --sessions 20 --idle 0.2 --url ws://127.0.0.1:8080/speech/tts --arm direct32 --output out/k-frontier/direct32 | tee out/k-frontier/run.log
+      - name: Strict frontier verdict
+        run: python3 scripts/kairos_k_frontier_verdict.py out/k-frontier | tee out/k-frontier/verdict.log
+      - name: Upload all evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: kairos-strict-k-frontier-evidence
+          path: out/k-frontier/
+          retention-days: 30
