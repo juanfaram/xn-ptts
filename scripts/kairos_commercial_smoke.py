@@ -49,7 +49,7 @@ async def one(ws,session_id,deadline_ms,reference,timeout):
                 if not frags:raise RuntimeError("empty audio")
                 m0=simulate(frags);m1r=m1(frags)
                 difference=lsb(reference,bytes(raw))
-                return {"session":session_id,"deadline_ms":deadline_ms,"status":"completed","elapsed_ms":elapsed,"ttfa_ms":(first-t0)*1000,"chunks":len(frags),"pcm_sha256":hashlib.sha256(raw).hexdigest(),"max_abs_lsb":difference,"M0_episodes":m0["episode_count"],"M1_episodes":m1r["episode_count"],"M1_stall_ms":m1r["total_stall_ms"],"valid":elapsed<=deadline_ms and difference is not None and difference<=1 and m0["episode_count"]==0}
+                return {"session":session_id,"deadline_ms":deadline_ms,"status":"completed","elapsed_ms":elapsed,"ttfa_ms":(first-t0)*1000,"chunks":len(frags),"pcm_sha256":hashlib.sha256(raw).hexdigest(),"max_abs_lsb":difference,"M0_episodes":m0["episode_count"],"M1_episodes":m1r["episode_count"],"M1_stall_ms":m1r["total_stall_ms"],"valid":(first-t0)*1000<=deadline_ms and difference is not None and difference<=1 and m0["episode_count"]==0}
     except Exception as exc:
         return {"session":session_id,"deadline_ms":deadline_ms,"status":"error","error":repr(exc),"elapsed_ms":(time.perf_counter()-start)*1000,"valid":False}
 async def reference(url):
@@ -98,7 +98,7 @@ async def main(a):
             (out/"runs.json").write_text(json.dumps(rows,indent=2)+"\n")
             print(json.dumps({k:v for k,v in row.items() if k!="requests"}),flush=True)
     measured=[r for r in rows if not r["warmup"]]
-    summary={"model":"provisional real Phonon FIFO/EDF; M0 virtual; one generation per offered session","rows":[{k:v for k,v in r.items() if k!="requests"} for r in measured],"offered":sum(r["offered"] for r in measured),"valid":sum(r["valid"] for r in measured),"rejected":sum(r["rejected"] for r in measured),"elapsed_s":sum(r["elapsed_s"] for r in measured),"warning":"No cost assigned, no multi-generation sessions, no sustained load; do not claim commercial SES/eur"}
+    summary={"direct_pair_max_abs_lsb":direct_lsb,"model":"provisional real Phonon FIFO/EDF; M0 virtual; one generation per offered session","rows":[{k:v for k,v in r.items() if k!="requests"} for r in measured],"offered":sum(r["offered"] for r in measured),"valid":sum(r["valid"] for r in measured),"rejected":sum(r["rejected"] for r in measured),"elapsed_s":sum(r["elapsed_s"] for r in measured),"warning":"No cost assigned, no multi-generation sessions, no sustained load; do not claim commercial SES/eur"}
     (out/"summary.json").write_text(json.dumps(summary,indent=2)+"\n")
 if __name__=="__main__":
     p=argparse.ArgumentParser()
