@@ -8,6 +8,24 @@ from kairos_paired_load import schedule, SESSIONS, TURNS, SESSION_TIMEOUT_S
 SETUP={"type":"setup","json_config":"","model_name":"","output_format":"pcm","voice":None,"voice_id":None,"voice_emb":None}
 TEXT="Hello, this is a test of the Phonon TTS system."
 
+async def warmup(args):
+    async with websockets.connect(args.url,open_timeout=10,max_size=2**22) as ws:
+        await ws.send(json.dumps(SETUP))
+        while True:
+            r=json.loads(await asyncio.wait_for(ws.recv(),15))
+            if r.get("type")=="ready":break
+            if r.get("type")=="error":raise RuntimeError("warmup setup "+str(r))
+        await ws.send(json.dumps({"type":"text","text":TEXT}))
+        await ws.send(json.dumps({"type":"flush","flush_id":1}))
+        chunks=0
+        while True:
+            r=json.loads(await asyncio.wait_for(ws.recv(),args.timeout))
+            if r.get("type")=="audio":chunks+=1
+            if r.get("type")=="flushed" and r.get("flush_id")==1:break
+            if r.get("type")=="error":raise RuntimeError("warmup generation "+str(r))
+        if not chunks:raise RuntimeError("warmup no audio")
+        print(json.dumps({"warmup_discarded":True,"chunks":chunks}),flush=True)
+
 async def client(i,args,events,t0):
     out={"session":i,"connected":False,"turns":[]}
     ws=None
@@ -84,8 +102,13 @@ def main():
     p.add_argument("--activity",type=int,choices=(10,25,40),required=True)
     p.add_argument("--repeat",type=int,choices=range(1,6),required=True)
     p.add_argument("--timeout",type=float,default=300)
-    p.add_argument("--output",required=True)
+    p.add_argument("--output")
+    p.add_argument("--warmup",action="store_true")
     args=p.parse_args()
+    if args.warmup:
+        asyncio.run(warmup(args))
+        return
+    if not args.output:p.error("--output required for measured runs")
     out=asyncio.run(run(args))
     dest=Path(args.output);dest.parent.mkdir(parents=True,exist_ok=True)
     dest.write_text(json.dumps(out,indent=2)+"\n")
