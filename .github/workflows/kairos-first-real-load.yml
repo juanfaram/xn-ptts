@@ -70,6 +70,15 @@ jobs:
           from huggingface_hub import snapshot_download
           snapshot_download(repo_id="gradium/phonon-31m-en",local_dir="phonon-model")
           PY
+      - name: Capture CPU and runner identity
+        shell: bash
+        run: |
+          uname -a > out/runner-identity.txt
+          lscpu >> out/runner-identity.txt
+          grep -m1 'model name' /proc/cpuinfo >> out/runner-identity.txt || true
+          echo "GITHUB_SHA=$GITHUB_SHA" >> out/runner-identity.txt
+          echo "RUN_ID=$GITHUB_RUN_ID" >> out/runner-identity.txt
+          cat out/runner-identity.txt
       - name: First real 10pct one repetition per arm
         shell: bash
         run: |
