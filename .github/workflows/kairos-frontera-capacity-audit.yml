@@ -1,0 +1,27 @@
+name: KAIROS FRONTERA frozen capacity audit
+on:
+  push:
+    branches: ['run/kairos-frontera-capacity-audit']
+    paths: ['scripts/kairos_frontera_source_audit.py', '.github/workflows/kairos-frontera-capacity-audit.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  audit:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Verify original engine batching and admission
+        run: |
+          set -euo pipefail
+          python3 scripts/kairos_frontera_source_audit.py
+          { git rev-parse HEAD; sha256sum scripts/kairos_frontera_source_audit.py; } > out/frontera/identity.txt
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: kairos-frontera-source-audit
+          path: out/frontera/
+          retention-days: 30
