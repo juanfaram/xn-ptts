@@ -1,7 +1,7 @@
 # Memory-derived connection cap = 134 (80% RAM); with only 60 offered sessions
 # it is NOT reached. Memory-density advantage is OUTSIDE this experiment.
 # Policy differential: Q=FIFO, C=EDF. Rejections count as failures.
-name: KAIROS paired real-Phonon pilot B8 Q3 C3
+name: KAIROS paired real-Phonon pilot B8 Q3 D3 C3
 on:
   workflow_dispatch:
 permissions:
@@ -15,15 +15,16 @@ jobs:
           - {arm: B, permits: 8}
           - {arm: Q, permits: 3}
           - {arm: C, permits: 3}
+          - {arm: D, permits: 3}
     runs-on: ubuntu-22.04
-    timeout-minutes: 60
+    timeout-minutes: 90
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with: {python-version: '3.11'}
       - name: Preflight
         run: |
-          python3 -m py_compile scripts/kairos_paired_load.py scripts/kairos_paired_ws_runner.py scripts/kairos_patch_ws_c_edf.py scripts/kairos_patch_ws_bhigh_q.py
+          python3 -m py_compile scripts/kairos_paired_load.py scripts/kairos_paired_ws_runner.py scripts/kairos_patch_ws_c_edf.py scripts/kairos_patch_ws_bhigh_q.py scripts/kairos_patch_ws_fifo_deadline.py
           python3 scripts/kairos_paired_load.py --test
           mkdir -p out
           python3 scripts/kairos_paired_load.py --output out/offered-load.json
@@ -34,6 +35,7 @@ jobs:
         run: |
           if [ "${{ matrix.arm }}" = Q ]; then python3 scripts/kairos_patch_ws_bhigh_q.py; fi
           if [ "${{ matrix.arm }}" = C ]; then python3 scripts/kairos_patch_ws_c_edf.py; fi
+          if [ "${{ matrix.arm }}" = D ]; then python3 scripts/kairos_patch_ws_fifo_deadline.py; fi
       - name: Build and freeze hashes
         run: |
           cargo build --release -p ptts-ws-server
