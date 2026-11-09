@@ -21,7 +21,9 @@ name: KAIROS 4-arm first real load 10pct 1 repetition
 on:
   push:
     branches: ['run/kairos-policy-isolation-k23']
-    paths: ['.github/workflows/kairos-first-real-load.yml']
+    paths:
+      - '.github/workflows/kairos-first-real-load.yml'
+      - 'scripts/kairos_paired_ws_runner.py'
   workflow_dispatch:
 env:
   REFERENCE_EUR_PER_HOUR: '0.1378'
