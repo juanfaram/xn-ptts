@@ -5,7 +5,7 @@ on:
     paths:
       - 'scripts/kairos_paired_ws_runner.py'
       - 'scripts/kairos_paired_load.py'
-      - 'scripts/kairos_patch_ws_c.py'
+      - 'scripts/kairos_patch_ws_c_edf.py'
       - 'scripts/kairos_patch_ws_bhigh_q.py'
       - '.github/workflows/kairos-three-arm-smoke.yml'
   workflow_dispatch:
@@ -30,7 +30,7 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p out
-          python3 -m py_compile scripts/kairos_paired_load.py scripts/kairos_paired_ws_runner.py scripts/kairos_patch_ws_c.py scripts/kairos_patch_ws_bhigh_q.py
+          python3 -m py_compile scripts/kairos_paired_load.py scripts/kairos_paired_ws_runner.py scripts/kairos_patch_ws_c_edf.py scripts/kairos_patch_ws_bhigh_q.py
           python3 scripts/kairos_paired_load.py --test
           git fetch origin e5110afd3ead725c940b6411eec4985fb8b111aa --depth=1
           git diff --exit-code e5110afd3ead725c940b6411eec4985fb8b111aa HEAD -- ptts/src ptts-ws-server/src ptts-ws-server/Cargo.toml
@@ -38,7 +38,7 @@ jobs:
         shell: bash
         run: |
           if [ "${{ matrix.arm }}" = Q ]; then python3 scripts/kairos_patch_ws_bhigh_q.py; fi
-          if [ "${{ matrix.arm }}" = C ]; then python3 scripts/kairos_patch_ws_c.py; fi
+          if [ "${{ matrix.arm }}" = C ]; then python3 scripts/kairos_patch_ws_c_edf.py; fi
       - name: Compile and freeze binary
         run: |
           cargo build --release -p ptts-ws-server
