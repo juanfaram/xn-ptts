@@ -23,29 +23,47 @@ async def setup(url):
         m=json.loads(await ws.recv())
         if m["type"]=="error":raise RuntimeError(str(m))
         if m["type"]=="ready":return ws
-async def generate(ws,turn,deadline_ms,reference=None,trace_id=None):
+async def generate(ws,turn,deadline_ms,reference=None,trace_id=None,max_retries=0):
     await ws.send(json.dumps({"type":"text","text":TEXT}))
     t0=time.perf_counter()
     t_request_ns=time.monotonic_ns()
     request={"type":"flush","flush_id":turn+1,"deadline_ms":deadline_ms}
     if trace_id is not None:request["kairos_trace_id"]=trace_id
-    await ws.send(json.dumps(request))
     raw=bytearray();frags=[];first=None
-    while True:
-        m=json.loads(await ws.recv())
-        if m["type"]=="error":
-            return {"status":"rejected","code":m.get("code"),"reason":m.get("message"),"valid":False}
-        if m["type"]=="audio":
-            now=time.perf_counter()
-            if first is None:first=now
-            raw.extend(base64.b64decode(m["audio"],validate=True))
-            frags.append({"idx":len(frags),"ts_recv_monotonic_s":now,"frag_ms":(float(m["stop_s"])-float(m["start_s"]))*1000})
-        if m["type"]=="flushed" and m.get("flush_id")==turn+1:break
-    if not frags:return {"status":"empty","valid":False}
+    attempts=[]
+    for attempt in range(max_retries+1):
+        remaining_ms=deadline_ms-(time.perf_counter()-t0)*1000
+        if remaining_ms<=0:
+            return {"status":"deadline_expired","attempts":attempts,"valid":False}
+        request["deadline_ms"]=remaining_ms
+        await ws.send(json.dumps(request))
+        while True:
+            m=json.loads(await ws.recv())
+            if m["type"]=="error":
+                attempts.append({"attempt":attempt+1,"code":m.get("code"),"retry_after_seconds":m.get("retry_after_seconds")})
+                if attempt>=max_retries or m.get("code") not in (408,429):
+                    return {"status":"rejected","code":m.get("code"),"reason":m.get("message"),"attempts":attempts,"valid":False}
+                delay=max(float(m.get("retry_after_seconds") or 0),0.05*(2**attempt))
+                if (time.perf_counter()-t0)+delay>=deadline_ms/1000:
+                    return {"status":"deadline_expired","attempts":attempts,"valid":False}
+                await asyncio.sleep(delay)
+                break
+            if m["type"]=="audio":
+                now=time.perf_counter()
+                if first is None:first=now
+                raw.extend(base64.b64decode(m["audio"],validate=True))
+                frags.append({"idx":len(frags),"ts_recv_monotonic_s":now,"frag_ms":(float(m["stop_s"])-float(m["start_s"]))*1000})
+            if m["type"]=="flushed" and m.get("flush_id")==turn+1:
+                attempts.append({"attempt":attempt+1,"code":200})
+                break
+        if first is not None:break
+    else:
+        return {"status":"rejected","attempts":attempts,"valid":False}
+    if not frags:return {"status":"empty","attempts":attempts,"valid":False}
     ttfa=(first-t0)*1000
     episodes=simulate(frags)["episode_count"]
     difference=lsb(reference,bytes(raw)) if reference is not None else None
-    return {"status":"completed","trace_id":trace_id,"t_request_ns":t_request_ns,"t_first_audio_ns":int(first*1e9),"ttfa_ms":round(ttfa,3),"m0_episodes":episodes,
+    return {"status":"completed","attempts":attempts,"trace_id":trace_id,"t_request_ns":t_request_ns,"t_first_audio_ns":int(first*1e9),"ttfa_ms":round(ttfa,3),"m0_episodes":episodes,
             "max_abs_lsb":difference,"pcm_sha256":hashlib.sha256(raw).hexdigest(),
             "valid":ttfa<=deadline_ms and episodes==0 and difference is not None and difference<=1,
             "_pcm":bytes(raw)}
@@ -79,7 +97,7 @@ async def wave(a,ref,activity,rep):
             async def one(i):
                 if clients[i] is None:return {"status":"rejected","code":429,"valid":False}
                 try:
-                    return await asyncio.wait_for(generate(clients[i],turn,deadlines[i],ref[turn],f"{a.arm}:{activity}:{rep}:{i}:{turn}" if a.trace else None),timeout=25)
+                    return await asyncio.wait_for(generate(clients[i],turn,deadlines[i],ref[turn],f"{a.arm}:{activity}:{rep}:{i}:{turn}" if a.trace else None,a.max_retries),timeout=25)
                 except Exception as exc:return {"status":"error","error":repr(exc),"valid":False}
             batch=await asyncio.gather(*(one(i) for i in offered))
             for i,x in zip(offered,batch):
@@ -122,7 +140,10 @@ if __name__=="__main__":
     p.add_argument("--trace",action="store_true")
     p.add_argument("--activities",type=float,nargs="+",default=[.10,.25,.50])
     p.add_argument("--repeats",type=int,default=6)
+    p.add_argument("--max-retries",type=int,default=0)
     p.add_argument("--short-ms",type=int,default=240)
     p.add_argument("--long-ms",type=int,default=1000)
     p.add_argument("--allow-admission-rejects",action="store_true")
-    asyncio.run(main(p.parse_args()))
+    a=p.parse_args()
+    if a.max_retries not in (0,1,2):p.error("max-retries must be 0..2")
+    asyncio.run(main(a))
