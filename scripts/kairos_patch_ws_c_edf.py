@@ -63,6 +63,9 @@ async fn acquire_edf(permits: Arc<tokio::sync::Semaphore>, deadline: Instant) ->
         }
         tokio::select! {
             _ = &mut notified => {},
+            // A permit may be released by a non-EDF holder (e.g. test blocker).
+            // Such release does not notify the EDF queue: bounded recheck.
+            _ = tokio::time::sleep(Duration::from_millis(2)) => {},
             _ = tokio::time::sleep_until(tokio::time::Instant::from_std(deadline)) => { tracing::warn!("KAIROS_REJECT_DEADLINE"); return None; },
         }
     }
