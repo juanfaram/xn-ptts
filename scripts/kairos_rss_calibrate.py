@@ -5,6 +5,7 @@ Local loopback only. All sessions remain open through the full 10/25/50/100 stai
 import argparse,asyncio,json,math,os,time
 from pathlib import Path
 from websockets.asyncio.client import connect
+from websockets.protocol import State
 
 def rss_kib(pid):
     for line in Path(f"/proc/{pid}/status").read_text().splitlines():
@@ -29,7 +30,7 @@ async def main(a):
     held=[];rows=[];ram=ram_kib();budget=.8*ram
     async def sample(n,phase):
         await asyncio.sleep(a.settle)
-        alive=sum(not ws.closed for ws in held)
+        alive=sum(ws.state is State.OPEN for ws in held)
         if alive!=n:raise RuntimeError(f"expected {n} live WS, found {alive}")
         readings=[]
         for _ in range(5):
