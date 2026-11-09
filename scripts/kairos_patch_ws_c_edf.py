@@ -33,7 +33,7 @@ impl Drop for EdfWaiting {
         self.state.notify.notify_waiters();
     }
 }
-async fn acquire_edf(app: &AppState, deadline: Instant) -> Option<EdfLease> {
+async fn acquire_edf(permits: Arc<tokio::sync::Semaphore>, deadline: Instant) -> Option<EdfLease> {
     let state=edf();
     let id=state.next.fetch_add(1, Ordering::SeqCst);
     {
@@ -50,7 +50,7 @@ async fn acquire_edf(app: &AppState, deadline: Instant) -> Option<EdfLease> {
         let permit={
             let q=state.queue.lock().unwrap();
             let first=q.iter().min_by_key(|(seq,d)| (*d,*seq)).map(|(seq,_)| *seq);
-            if first==Some(id) { app.requests.clone().try_acquire_owned().ok() } else { None }
+            if first==Some(id) { permits.clone().try_acquire_owned().ok() } else { None }
         };
         if let Some(permit)=permit {
             drop(waiting);
@@ -118,7 +118,7 @@ change('''async fn generate_one(
     deadline: Option<Instant>,
 ) -> Result<()> {''')
 change("    let seed = app.seed_base ^ (stream_id as u64).wrapping_mul(0x9E3779B97F4A7C15);",'''    let started=Instant::now();
-    let Some(lease)=acquire_edf(app,deadline.unwrap_or_else(|| Instant::now()+Duration::from_millis(1000))).await else {
+    let Some(lease)=acquire_edf(app.requests.clone(),deadline.unwrap_or_else(|| Instant::now()+Duration::from_millis(1000))).await else {
         send_error(reply_tx,429,serde_json::json!({"reason":"deadline_expired_or_queue_full",
             "retry_after_ms":80,"retryable":true}).to_string()).await?;
         return Ok(());
@@ -126,6 +126,41 @@ change("    let seed = app.seed_base ^ (stream_id as u64).wrapping_mul(0x9E3779B
     tracing::info!(stream_id,wait_ms=started.elapsed().as_secs_f64()*1000.0,"KAIROS_C_EDF_ADMITTED");
     let seed = app.seed_base ^ (stream_id as u64).wrapping_mul(0x9E3779B97F4A7C15);''')
 change("    outcome.and(generated)\n}", "    drop(lease);\n    outcome.and(generated)\n}")
+s += """
+#[cfg(test)]
+mod kairos_edf_tests {
+    use super::*;
+    #[tokio::test]
+    async fn short_deadline_overtakes_long_and_releases() {
+        let sem=Arc::new(tokio::sync::Semaphore::new(1));
+        let blocker=sem.clone().acquire_owned().await.unwrap();
+        let long=tokio::spawn(acquire_edf(sem.clone(),Instant::now()+Duration::from_secs(3)));
+        tokio::time::sleep(Duration::from_millis(20)).await;
+        let short=tokio::spawn(acquire_edf(sem.clone(),Instant::now()+Duration::from_secs(2)));
+        tokio::time::sleep(Duration::from_millis(20)).await;
+        drop(blocker);
+        let short_lease=tokio::time::timeout(Duration::from_millis(500),short).await.unwrap().unwrap().unwrap();
+        assert_eq!(sem.available_permits(),0);
+        drop(short_lease);
+        let long_lease=tokio::time::timeout(Duration::from_millis(500),long).await.unwrap().unwrap().unwrap();
+        drop(long_lease);
+        assert_eq!(sem.available_permits(),1);
+    }
+    #[tokio::test]
+    async fn expired_waiter_rejected_and_next_enters() {
+        let sem=Arc::new(tokio::sync::Semaphore::new(1));
+        let blocker=sem.clone().acquire_owned().await.unwrap();
+        let expired=tokio::spawn(acquire_edf(sem.clone(),Instant::now()+Duration::from_millis(30)));
+        assert!(expired.await.unwrap().is_none());
+        let next=tokio::spawn(acquire_edf(sem.clone(),Instant::now()+Duration::from_secs(2)));
+        tokio::time::sleep(Duration::from_millis(20)).await;
+        drop(blocker);
+        let lease=tokio::time::timeout(Duration::from_millis(500),next).await.unwrap().unwrap().unwrap();
+        drop(lease);
+        assert_eq!(sem.available_permits(),1);
+    }
+}
+"""
 p.write_text(s)
 proto=Path("ptts-ws-server/src/protocol.rs")
 t=proto.read_text()
