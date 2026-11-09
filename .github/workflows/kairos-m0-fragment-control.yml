@@ -21,7 +21,7 @@ jobs:
           mkdir -p out/m0-control
           git fetch origin e5110afd3ead725c940b6411eec4985fb8b111aa --depth=1
           git diff --exit-code e5110afd3ead725c940b6411eec4985fb8b111aa HEAD -- ptts/src ptts-ws-server/src ptts-ws-server/Cargo.toml
-          { git rev-parse HEAD; lscpu; nproc; } > out/m0-control/env.txt
+          { git rev-parse HEAD; sha256sum scripts/kairos_multiturn.py scripts/kairos_m0_fragment_audit.py; lscpu; nproc; } > out/m0-control/env.txt
           python3 -m py_compile scripts/kairos_multiturn.py scripts/kairos_m0_fragment_audit.py
       - name: Install model
         run: |
