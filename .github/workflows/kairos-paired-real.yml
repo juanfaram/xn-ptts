@@ -1,3 +1,6 @@
+# Memory-derived connection cap = 134 (80% RAM); with only 60 offered sessions
+# it is NOT reached. Memory-density advantage is OUTSIDE this experiment.
+# Policy differential: Q=FIFO, C=EDF. Rejections count as failures.
 name: KAIROS paired real-Phonon pilot B8 Q3 C3
 on:
   workflow_dispatch:
