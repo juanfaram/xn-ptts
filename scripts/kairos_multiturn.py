@@ -109,7 +109,7 @@ async def main(a):
         "by_activity":[{"activity":act,"offered":sum(r["offered_sessions"] for r in measured if r["activity"]==act),
           "useful":sum(r["useful_sessions"] for r in measured if r["activity"]==act),
           "rejected_turns":sum(r["rejected_turns"] for r in measured if r["activity"]==act)}
-          for act in (.10,.25,.50)],
+          for act in a.activities],
         "warning":"Four-turn pilot, virtual M0, no device playback; no economic SES/eur without verified tariff and sustained throughput."},indent=2)+"\n")
 if __name__=="__main__":
     p=argparse.ArgumentParser()
