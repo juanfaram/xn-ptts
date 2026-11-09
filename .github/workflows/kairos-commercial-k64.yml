@@ -1,0 +1,33 @@
+name: KAIROS commercial K64 gate
+on:
+  push:
+    branches: ['run/kairos-commercial-k64']
+    paths: ['scripts/kairos_fifo_proxy.py','scripts/test_kairos_k64.py','.github/workflows/kairos-commercial-k64.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  test:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Validate both policies and existing proxy behavior
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p out/policy
+          python3 -m pip install 'websockets==15.0.1'
+          python3 -m unittest discover -s scripts -p test_kairos_fifo_proxy.py -v 2>&1 | tee out/policy/fifo.log
+          python3 -m unittest discover -s scripts -p test_kairos_proxy_noninterference.py -v 2>&1 | tee out/policy/relay.log
+          python3 -m unittest discover -s scripts -p test_kairos_policy_modes.py -v 2>&1 | tee out/policy/policy.log
+          python3 -m unittest discover -s scripts -p test_kairos_k64.py -v 2>&1 | tee out/policy/k64.log
+          sha256sum scripts/kairos_fifo_proxy.py > out/policy/proxy-sha256.txt
+          git rev-parse HEAD > out/policy/commit.txt
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: kairos-commercial-k64-evidence
+          path: out/policy/
