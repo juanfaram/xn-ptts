@@ -100,6 +100,22 @@ async def run(args):
     def valid_turn(t):
         return t.get("status")=="ok" and t.get("deadline_met") and t.get("fragments_complete")
     valid=sum(valid_turn(t) for t in turns)
+    reached_240=sum(t.get("ttfa_request_ms",float("inf"))<=240 for t in turns)
+    reach_240_rate=reached_240/len(turns)
+    invalid_by_reason={"connection":0,"queue":0,"deadline":0,"timeout":0,"ttfa":0,"audio":0,"other":0}
+    for sess in results:
+        if all(valid_turn(t) for t in sess["turns"]):continue
+        e=str(sess.get("connection_error","")).lower()
+        messages=" ".join(str(t.get("error","")) for t in sess["turns"]).lower()
+        statuses=" ".join(str(t.get("status","")) for t in sess["turns"]).lower()
+        if "429" in e:reason="connection"
+        elif "queue_full" in messages:reason="queue"
+        elif "deadline" in messages:reason="deadline"
+        elif "timeout" in e+messages+statuses:reason="timeout"
+        elif any(t.get("status")=="ok" and not t.get("deadline_met",False) for t in sess["turns"]):reason="ttfa"
+        elif any(t.get("status")=="ok" and not t.get("fragments_complete",False) for t in sess["turns"]):reason="audio"
+        else:reason="other"
+        invalid_by_reason[reason]+=1
     rejection_counts={"deadline_expired":0,"queue_full":0,"connection_limit":0,"other":0}
     for session in results:
         error=str(session.get("connection_error",""))
@@ -115,6 +131,7 @@ async def run(args):
             "offered":len(turns),"valid_preliminary":valid,"failed":len(turns)-valid,
             "offered_sessions":SESSIONS,"valid_sessions_preliminary":valid_sessions,
             "rejection_counts":rejection_counts,
+            "reach_240_count":reached_240,"reach_240_rate":reach_240_rate,\n            "reach_240_gate_80pct":reach_240_rate>=0.8,\n            "invalid_sessions_by_primary_reason":invalid_by_reason,
             "note":"Preliminary only: full C1-C4 SES certification requires frozen offline analyzer",
             "sessions":results}
 
