@@ -54,7 +54,7 @@ async fn acquire_edf(permits: Arc<tokio::sync::Semaphore>, deadline: Instant) ->
         };
         if let Some(permit)=permit {
             drop(waiting);
-            return Some(EdfLease { permit:Some(permit), state });
+            return Some(EdfLease { permit:Some(permit), state:state.clone() });
         }
         tokio::select! {
             _ = &mut notified => {},
