@@ -23,7 +23,7 @@ async def setup(url):
         m=json.loads(await ws.recv())
         if m["type"]=="error":raise RuntimeError(str(m))
         if m["type"]=="ready":return ws
-async def generate(ws,turn,deadline_ms,reference=None,trace_id=None):
+async def generate(ws,turn,deadline_ms,reference=None,trace_id=None,capture_fragments=False):
     await ws.send(json.dumps({"type":"text","text":TEXT}))
     t0=time.perf_counter()
     t_request_ns=time.monotonic_ns()
@@ -44,8 +44,20 @@ async def generate(ws,turn,deadline_ms,reference=None,trace_id=None):
     if not frags:return {"status":"empty","valid":False}
     ttfa=(first-t0)*1000
     episodes=simulate(frags)["episode_count"]
+    m1=None
+    if len(frags)>=2:
+        ts=[float(f["ts_recv_monotonic_s"])*1000 for f in frags]
+        ds=[float(f["frag_ms"]) for f in frags]
+        reserve=ds[0]+ds[1];stalls=0;stall_ms=0.0
+        for j in range(2,len(frags)):
+            gap=max(0.0,ts[j]-ts[j-1]-reserve)
+            stalls+=gap>1e-7;stall_ms+=gap
+            reserve=max(0.0,reserve-(ts[j]-ts[j-1]))+ds[j]
+        m1={"episodes":stalls,"stall_ms":round(stall_ms,6),"prebuffer_delay_ms":round(ts[1]-ts[0],3),
+            "ttaudible_ms":round((ts[1]-t0*1000),3),"buffer_audio_ms":round(ds[0]+ds[1],3)}
+
     difference=lsb(reference,bytes(raw)) if reference is not None else None
-    return {"status":"completed","trace_id":trace_id,"t_request_ns":t_request_ns,"t_first_audio_ns":int(first*1e9),"ttfa_ms":round(ttfa,3),"m0_episodes":episodes,
+    return {"status":"completed","trace_id":trace_id,"t_request_ns":t_request_ns,"t_first_audio_ns":int(first*1e9),"ttfa_ms":round(ttfa,3),"m0_episodes":episodes,"m1":m1,"fragments":frags if capture_fragments else None,
             "max_abs_lsb":difference,"pcm_sha256":hashlib.sha256(raw).hexdigest(),
             "valid":ttfa<=deadline_ms and episodes==0 and difference is not None and difference<=1,
             "_pcm":bytes(raw)}
@@ -79,7 +91,7 @@ async def wave(a,ref,activity,rep):
             async def one(i):
                 if clients[i] is None:return {"status":"rejected","code":429,"valid":False}
                 try:
-                    return await asyncio.wait_for(generate(clients[i],turn,deadlines[i],ref[turn],f"{a.arm}:{activity}:{rep}:{i}:{turn}" if a.trace else None),timeout=25)
+                    return await asyncio.wait_for(generate(clients[i],turn,deadlines[i],ref[turn],f"{a.arm}:{activity}:{rep}:{i}:{turn}" if a.trace else None,a.capture_fragments),timeout=25)
                 except Exception as exc:return {"status":"error","error":repr(exc),"valid":False}
             batch=await asyncio.gather(*(one(i) for i in offered))
             for i,x in zip(offered,batch):
@@ -120,6 +132,7 @@ if __name__=="__main__":
     p.add_argument("--sessions",type=int,default=20)
     p.add_argument("--idle",type=float,default=20)
     p.add_argument("--trace",action="store_true")
+    p.add_argument("--capture-fragments",action="store_true")
     p.add_argument("--activities",type=float,nargs="+",default=[.10,.25,.50])
     p.add_argument("--repeats",type=int,default=6)
     p.add_argument("--short-ms",type=int,default=240)
