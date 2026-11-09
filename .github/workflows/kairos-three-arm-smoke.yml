@@ -1,4 +1,4 @@
-name: KAIROS three-arm real Phonon smoke
+name: KAIROS four-arm real Phonon smoke
 on:
   push:
     branches: ['run/kairos-policy-isolation-k23']
@@ -6,7 +6,8 @@ on:
       - 'scripts/kairos_paired_ws_runner.py'
       - 'scripts/kairos_paired_load.py'
       - 'scripts/kairos_patch_ws_c_edf.py'
-      - 'scripts/kairos_patch_ws_bhigh_q.py scripts/kairos_patch_ws_fifo_deadline.py'
+      - 'scripts/kairos_patch_ws_bhigh_q.py'
+      - 'scripts/kairos_patch_ws_fifo_deadline.py'
       - '.github/workflows/kairos-three-arm-smoke.yml'
   workflow_dispatch:
 permissions:
@@ -31,7 +32,7 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p out
-          python3 -m py_compile scripts/kairos_paired_load.py scripts/kairos_paired_ws_runner.py scripts/kairos_patch_ws_c_edf.py scripts/kairos_patch_ws_bhigh_q.py
+          python3 -m py_compile scripts/kairos_paired_load.py scripts/kairos_paired_ws_runner.py scripts/kairos_patch_ws_c_edf.py scripts/kairos_patch_ws_bhigh_q.py scripts/kairos_patch_ws_fifo_deadline.py
           python3 scripts/kairos_paired_load.py --test
           git fetch origin e5110afd3ead725c940b6411eec4985fb8b111aa --depth=1
           git diff --exit-code e5110afd3ead725c940b6411eec4985fb8b111aa HEAD -- ptts/src ptts-ws-server/src ptts-ws-server/Cargo.toml
