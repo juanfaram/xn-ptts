@@ -2,7 +2,7 @@ name: KAIROS isolate external queue vs post admission
 on:
   push:
     branches: ['run/kairos-queue-latency-isolation']
-    paths: ['.github/workflows/kairos-queue-latency-isolation.yml', 'scripts/kairos_commercial_smoke.py', 'scripts/kairos_fifo_proxy.py']
+    paths: ['.github/workflows/kairos-queue-latency-isolation.yml', 'scripts/kairos_multiturn.py', 'scripts/kairos_fifo_proxy.py']
   workflow_dispatch:
 permissions:
   contents: read
