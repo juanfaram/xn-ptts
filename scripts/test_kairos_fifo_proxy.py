@@ -21,6 +21,31 @@ class Tests(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(asyncio.CancelledError):await t
         await q.release()
         self.assertEqual(q.active,0)
+    async def test_fifo_strict_order(self):
+        q=FIFO(1,1)
+        await q.acquire()
+        order=[]
+        async def waiter(i):
+            await q.acquire()
+            order.append(i)
+            await q.release()
+        tasks=[]
+        for i in range(4):
+            tasks.append(asyncio.create_task(waiter(i)))
+            await asyncio.sleep(.002)
+        await q.release()
+        await asyncio.gather(*tasks)
+        self.assertEqual(order,[0,1,2,3])
+        self.assertEqual(q.active,0)
+
+    async def test_timeout_does_not_release_others_permit(self):
+        q=FIFO(3,.01)
+        for _ in range(3):await q.acquire()
+        with self.assertRaises(asyncio.TimeoutError):await q.acquire()
+        self.assertEqual(q.active,3)
+        for _ in range(3):await q.release()
+        self.assertEqual(q.active,0)
+
     async def test_proxy_queues_flush_and_preserves_audio(self):
         concurrent=0;maximum=0
         async def backend(ws):
