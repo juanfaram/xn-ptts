@@ -68,6 +68,9 @@ async def reference(url):
 async def main(a):
     out=Path(a.output);out.mkdir(parents=True,exist_ok=True)
     ref=await reference(a.url)
+    ref2=await reference(a.url)
+    direct_lsb=lsb(ref,ref2)
+    (out/"direct-determinism.json").write_text(json.dumps({"direct_pair_max_abs_lsb":direct_lsb,"reference_bytes":len(ref),"reference2_bytes":len(ref2),"sha1":hashlib.sha256(ref).hexdigest(),"sha2":hashlib.sha256(ref2).hexdigest()},indent=2)+"\n")
     (out/"reference.sha256").write_text(hashlib.sha256(ref).hexdigest()+"\n")
     rows=[]
     from contextlib import AsyncExitStack
