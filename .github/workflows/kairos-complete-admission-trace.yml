@@ -2,7 +2,7 @@ name: KAIROS full queue occupancy and rejection trace
 on:
   push:
     branches: ['run/kairos-complete-admission-trace']
-    paths: ['.github/workflows/kairos-complete-admission-trace.yml', 'scripts/kairos_multiturn.py', 'scripts/kairos_fifo_proxy.py']
+    paths: ['.github/workflows/kairos-complete-admission-trace.yml', 'scripts/kairos_multiturn.py', 'scripts/kairos_trace_audit.py', 'scripts/kairos_fifo_proxy.py']
   workflow_dispatch:
 permissions:
   contents: read
@@ -62,6 +62,7 @@ jobs:
             proxy_pid=$!
             sleep 2
             python3 scripts/kairos_multiturn.py --trace --activities 0.25 0.50 --repeats 1 --url ws://127.0.0.1:8081/speech/tts --arm "$policy" --sessions 20 --idle 20 --output "out/complete-trace/$policy" | tee "out/complete-trace/$policy/run.log"
+            python3 scripts/kairos_trace_audit.py "out/complete-trace/$policy/proxy.log" "out/complete-trace/$policy/trace-audit.json"
             kill "$proxy_pid"
             wait "$proxy_pid" || true
             sleep 2
