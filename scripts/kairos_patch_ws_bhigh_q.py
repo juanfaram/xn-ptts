@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
-"""B-high+Q fixed-two admission control patch; applies ONLY to pinned WS handler, never upstream.
-Connection cap=200, generation permits from --max-concurrent-requests,
+"""B-high+Q fixed-three admission control patch; applies ONLY to pinned WS handler, never upstream.
+Connection cap=134, generation permits from --max-concurrent-requests,
 bounded waiting=64, timeout=80ms (one initial 80ms audio chunk on 31m).
 NO deadline-priority scheduler; FIFO Tokio semaphore. Do not claim otherwise.
 429 cannot be sent after WebSocket upgrade: send protocol Error{code:429}.
@@ -17,7 +17,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::OnceLock;
 static CONNECTIONS: OnceLock<std::sync::Arc<tokio::sync::Semaphore>> = OnceLock::new();
 static WAITING: AtomicUsize = AtomicUsize::new(0);
-const CONNECTION_LIMIT: usize = 200;
+const CONNECTION_LIMIT: usize = 134;
 const MAX_WAITING: usize = 64;
 const ADMISSION_TIMEOUT: Duration = Duration::from_millis(80);
 struct WaitingGuard;
@@ -52,4 +52,4 @@ replace("    let seed = app.seed_base ^ (stream_id as u64).wrapping_mul(0x9E3779
     let seed = app.seed_base ^ (stream_id as u64).wrapping_mul(0x9E3779B97F4A7C15);""")
 replace("    outcome.and(generated)\n}", "    drop(permit);\n    outcome.and(generated)\n}")
 p.write_text(s)
-print("B-high+Q applied: 200 connections, fixed generation permits configured as 2, FIFO queue 64, 80ms deadline")
+print("B-high+Q applied: 134 connections, fixed generation permits configured as 3, FIFO queue 64, 80ms deadline")
