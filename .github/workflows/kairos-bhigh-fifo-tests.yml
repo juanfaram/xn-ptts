@@ -5,6 +5,7 @@ on:
     paths:
       - 'scripts/kairos_fifo_proxy.py'
       - 'scripts/test_kairos_fifo_proxy.py'
+      - 'scripts/test_kairos_proxy_noninterference.py'
       - '.github/workflows/kairos-bhigh-fifo-tests.yml'
   workflow_dispatch:
 permissions:
@@ -25,7 +26,8 @@ jobs:
           mkdir -p out/fifo
           python3 -m pip install 'websockets==15.0.1'
           python3 -m unittest discover -s scripts -p test_kairos_fifo_proxy.py -v 2>&1 | tee out/fifo/tests.log
-          sha256sum scripts/kairos_fifo_proxy.py scripts/test_kairos_fifo_proxy.py > out/fifo/source-sha256.txt
+          python3 -m unittest discover -s scripts -p test_kairos_proxy_noninterference.py -v 2>&1 | tee out/fifo/noninterference.log
+          sha256sum scripts/kairos_fifo_proxy.py scripts/test_kairos_fifo_proxy.py scripts/test_kairos_proxy_noninterference.py > out/fifo/source-sha256.txt
           git rev-parse HEAD > out/fifo/commit.txt
       - name: Upload evidence
         if: always()
