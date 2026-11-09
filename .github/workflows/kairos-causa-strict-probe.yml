@@ -1,0 +1,68 @@
+name: KAIROS CAUSA strict FIFO vs B8 real Phonon probe
+on:
+  push:
+    branches: ['run/kairos-economic-verdict']
+    paths: ['.github/workflows/kairos-causa-strict-probe.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  probe:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 100
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Pin source and check tools
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p out/causa-probe
+          git fetch origin e5110afd3ead725c940b6411eec4985fb8b111aa --depth=1
+          git diff --exit-code e5110afd3ead725c940b6411eec4985fb8b111aa HEAD -- ptts/src ptts-ws-server/src ptts-ws-server/Cargo.toml
+          { git rev-parse HEAD; nproc; lscpu; free -m; } > out/causa-probe/env.txt
+          python3 -m py_compile scripts/kairos_multiturn.py scripts/kairos_fifo_proxy.py scripts/kairos_causa_probe_verdict.py
+      - name: Download Phonon model
+        run: |
+          python3 -m pip install --user huggingface_hub 'websockets>=13,<17'
+          python3 - <<'PY'
+          from huggingface_hub import snapshot_download
+          snapshot_download(repo_id="gradium/phonon-31m-en",local_dir="phonon-model")
+          PY
+      - name: Compile original Phonon server
+        run: cargo build --release -p ptts-ws-server
+      - name: Run controlled idle20 and idle2 regimes, FIFO and B8
+        shell: bash
+        run: |
+          set -euo pipefail
+          for regime in idle20 idle2; do
+            if [ "$regime" = idle20 ]; then idle=20; else idle=2; fi
+            mkdir -p "out/causa-probe/$regime/fifo_expire" "out/causa-probe/$regime/b8"
+            RUST_LOG=info ./target/release/ptts-ws-server --model phonon-model --voice-catalog '' --lang en --device cpu --max-concurrent-requests 32 --addr 127.0.0.1:8080 > "out/causa-probe/$regime/server-fifo.log" 2>&1 &
+            server_pid=$!
+            sleep 4
+            python3 scripts/kairos_fifo_proxy.py --policy fifo_expire --slots 3 --max-queue 64 --timeout 1 --max-clients 24 --port 8081 > "out/causa-probe/$regime/fifo_expire/proxy.log" 2>&1 &
+            proxy_pid=$!
+            sleep 2
+            python3 scripts/kairos_multiturn.py --url ws://127.0.0.1:8081/speech/tts --arm fifo_expire --sessions 20 --idle "$idle" --repeats 3 --trace --output "out/causa-probe/$regime/fifo_expire" | tee "out/causa-probe/$regime/fifo_expire/run.log"
+            kill "$proxy_pid"; wait "$proxy_pid" || true
+            kill "$server_pid"; wait "$server_pid" || true
+            sleep 2
+            RUST_LOG=info ./target/release/ptts-ws-server --model phonon-model --voice-catalog '' --lang en --device cpu --max-concurrent-requests 8 --addr 127.0.0.1:8080 > "out/causa-probe/$regime/server-b8.log" 2>&1 &
+            server_pid=$!
+            sleep 4
+            python3 scripts/kairos_multiturn.py --url ws://127.0.0.1:8080/speech/tts --arm b8 --allow-admission-rejects --sessions 20 --idle "$idle" --repeats 3 --output "out/causa-probe/$regime/b8" | tee "out/causa-probe/$regime/b8/run.log"
+            kill "$server_pid"; wait "$server_pid" || true
+            sleep 2
+          done
+      - name: Strict commercial gate and causal metrics
+        run: python3 scripts/kairos_causa_probe_verdict.py --root out/causa-probe | tee out/causa-probe/verdict.log
+      - name: Upload evidence even on failure
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: kairos-causa-strict-probe-evidence
+          path: out/causa-probe/
+          retention-days: 30
