@@ -61,16 +61,24 @@ async def main(a):
         observed=[(r["rss_kib"]-rows[0]["rss_kib"])/r["connections"] for r in rows[1:]]
         worst=max(observed)
         conservative=max(0,math.floor((budget-rows[0]["rss_kib"])/worst))
-        report={"ram_kib":ram,"budget_80pct_kib":budget,"server_pid":a.pid,
+        residuals=[r["rss_kib"]-(intercept+slope*r["connections"]) for r in rows]
+        trend=sum((i-(len(residuals)-1)/2)*v for i,v in enumerate(residuals))
+        residual_scale=sum(abs(v) for v in residuals)
+        residual_trend_ratio=abs(trend)/(max(1,len(residuals))*max(residual_scale,1))
+        fit_accepted=(r2 is not None and r2>=.9 and residual_trend_ratio<.1)
+        report={"fit_accepted":fit_accepted,"residuals_kib":residuals,"residual_trend_ratio":residual_trend_ratio,"ram_kib":ram,"budget_80pct_kib":budget,"server_pid":a.pid,
                 "measurements":rows,"linear_fit":{"intercept_kib":intercept,"slope_kib_per_session":slope,"r_squared":r2},
                 "observed_max_increment_kib_per_session":worst,
-                "linear_cap_extrapolated":cap,"conservative_cap_extrapolated":conservative,
+                "linear_cap_extrapolated":cap if fit_accepted else None,"conservative_cap_extrapolated":conservative if fit_accepted else None,
                 "measured_safe_max_sessions":max((r["connections"] for r in rows if r["rss_kib"]<=budget),default=0),
                 "warning":"Extrapolated cap is not measured capacity; reserve RAM for proxy, OS and other processes; RSS includes model warmup and allocator effects."}
         (output.parent/"rss-capacity.json").write_text(json.dumps(report,indent=2)+"\n")
         print(json.dumps({k:v for k,v in report.items() if k!="measurements"},indent=2),flush=True)
+        if not fit_accepted:print("INVALID FIT: do not use extrapolated cap",flush=True)
     finally:
         await asyncio.gather(*(ws.close() for ws in held),return_exceptions=True)
+        held.clear()
+        await sample(0,"after_close")
 if __name__=="__main__":
     p=argparse.ArgumentParser()
     p.add_argument("--url",default="ws://127.0.0.1:8080/speech/tts")
