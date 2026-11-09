@@ -1,0 +1,47 @@
+{
+  "schema": "kairos-commercial-gate-audit-v1",
+  "source_run_id": 42621484283,
+  "source_commit": "061ad07802ddeeb66140dcec80470404567ad62b",
+  "source_artifact_id": 13679888792,
+  "hardware": "AMD EPYC 9V45 96-Core Processor",
+  "source": "original archived runs.json from three arms; 15 measured waves per arm",
+  "definition": "four-turn useful per original pilot deadline/M0/PCM; distinct from global p99<=200ms certification",
+  "arms": {
+    "b8": {
+      "offered_sessions": 85,
+      "useful_sessions": 30,
+      "completed_turns": 136,
+      "rejected_turns": 204,
+      "ttfa_p99_completed_ms": 65.71,
+      "m0_stall_completed_turns": 4,
+      "pcm_fail_completed_turns": 0
+    },
+    "fifo_expire": {
+      "offered_sessions": 85,
+      "useful_sessions": 73,
+      "completed_turns": 340,
+      "rejected_turns": 0,
+      "ttfa_p99_completed_ms": 925.726,
+      "m0_stall_completed_turns": 12,
+      "pcm_fail_completed_turns": 0
+    },
+    "edf": {
+      "offered_sessions": 85,
+      "useful_sessions": 66,
+      "completed_turns": 340,
+      "rejected_turns": 0,
+      "ttfa_p99_completed_ms": 959.036,
+      "m0_stall_completed_turns": 19,
+      "pcm_fail_completed_turns": 0
+    }
+  },
+  "strict_commercial_verdict": "NOT CERTIFIED",
+  "reasons": [
+    "FIFO and EDF completed-turn TTFA p99 exceed 200ms",
+    "M0 stall events observed in all three arms",
+    "B8 completed-turn TTFA conditional on 204 rejected turns, not comparable as unconditional SLA",
+    "Pilot wave wall time includes 20-second idle periods; indicative SES/euro is not sustained production economics",
+    "EDF vs FIFO paired-wave 95% confidence interval crosses zero"
+  ],
+  "next_gate": "No further algorithm variants; validate admission-to-first-audio timing and M0 under a pre-registered sustained paired load on identical hardware."
+}
