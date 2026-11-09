@@ -1,0 +1,114 @@
+# NON-COMPARABILITY: previous run offered 85 independent requests;
+# this run offers 60 persistent sessions x 3 turns = 180 generations per repetition.
+# Do NOT compare raw 14/48/54/54 historical counts to this run.
+# SES ACCOUNTING: each of 60 offered sessions is counted exactly once.
+# A session is valid ONLY if all three generations are valid; a single rejected,
+# expired, timed-out, late, or interrupted generation invalidates the whole session.
+# Every rejected session stays in the denominator, including HTTP 429 handshake.
+# Q uses fixed 80ms admission timeout; D/C use client deadlines. Interpret Q's
+# timeout failures separately; do not attribute them to FIFO ordering alone.
+# 240ms reachability must be measured and reported, not assumed from smoke.
+# Any incomplete matrix arm or repetition is INCOMPLETE, never a complete comparison.
+# Decision: C-D confidence interval crossing zero means NO demonstrated EDF advantage.
+# Memory-derived connection cap = 134 (80% RAM); with only 60 offered sessions
+# it is NOT reached. Memory-density advantage is OUTSIDE this experiment.
+# Policy differential: Q=FIFO, C=EDF. Rejections count as failures.
+# Price frozen 2026-11-09: Hetzner CCX23 EU 4 dedicated vCPU / 16 GB,
+# EUR 0.1378/hour excl VAT. Official provider:
+# https://docs.hetzner.com/general/infrastructure-and-availability/price-adjustment/
+# Reference equivalent only, NOT the actual GitHub Actions runner price.
+name: KAIROS 4-arm first real load 10pct 1 repetition
+on:
+  push:
+    branches: ['run/kairos-policy-isolation-k23']
+    paths: ['.github/workflows/kairos-first-real-load.yml']
+  workflow_dispatch:
+env:
+  REFERENCE_EUR_PER_HOUR: '0.1378'
+permissions:
+  contents: read
+jobs:
+  paired:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {arm: B, permits: 8}
+          - {arm: Q, permits: 3}
+          - {arm: C, permits: 3}
+          - {arm: D, permits: 3}
+    runs-on: ubuntu-22.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: '3.11'}
+      - name: Preflight
+        run: |
+          python3 -m py_compile scripts/kairos_paired_load.py scripts/kairos_paired_ws_runner.py scripts/kairos_patch_ws_c_edf.py scripts/kairos_patch_ws_bhigh_q.py scripts/kairos_patch_ws_fifo_deadline.py
+          python3 scripts/kairos_paired_load.py --test
+          mkdir -p out
+          python3 scripts/kairos_paired_load.py --output out/offered-load.json
+          git fetch origin e5110afd3ead725c940b6411eec4985fb8b111aa --depth=1
+          git diff --exit-code e5110afd3ead725c940b6411eec4985fb8b111aa HEAD -- ptts/src ptts-ws-server/src ptts-ws-server/Cargo.toml
+      - name: Apply policy patch
+        shell: bash
+        run: |
+          if [ "${{ matrix.arm }}" = Q ]; then python3 scripts/kairos_patch_ws_bhigh_q.py; fi
+          if [ "${{ matrix.arm }}" = C ]; then python3 scripts/kairos_patch_ws_c_edf.py; fi
+          if [ "${{ matrix.arm }}" = D ]; then python3 scripts/kairos_patch_ws_fifo_deadline.py; fi
+      - name: Build and freeze hashes
+        run: |
+          cargo build --release -p ptts-ws-server
+          sha256sum target/release/ptts-ws-server scripts/kairos_paired_ws_runner.py scripts/kairos_paired_load.py .github/workflows/kairos-first-real-load.yml > out/identity.sha256
+      - name: Download model
+        run: |
+          python3 -m pip install 'websockets>=13,<17' huggingface_hub
+          python3 - <<'PY'
+          from huggingface_hub import snapshot_download
+          snapshot_download(repo_id="gradium/phonon-31m-en",local_dir="phonon-model")
+          PY
+      - name: First real 10pct one repetition per arm
+        shell: bash
+        run: |
+          set -euo pipefail
+          for ACT in 10; do
+            for REP in 1; do
+              ./target/release/ptts-ws-server --addr 127.0.0.1:8080 --model phonon-model --lang en --device cpu --max-concurrent-requests ${{ matrix.permits }} --voice-dir phonon-model > "out/server-${ACT}-${REP}.log" 2>&1 &
+              PID=$!
+              trap 'kill "$PID" 2>/dev/null || true' EXIT
+              python3 - <<'PY'
+          import socket,time
+          for _ in range(120):
+              try:
+                  s=socket.create_connection(("127.0.0.1",8080),timeout=1);s.close();break
+              except OSError:time.sleep(1)
+          else:raise SystemExit("server did not start")
+          PY
+              python3 scripts/kairos_paired_ws_runner.py --warmup --arm "${{ matrix.arm }}" --activity "$ACT" --repeat "$REP" --timeout 180
+              python3 scripts/kairos_paired_ws_runner.py --arm "${{ matrix.arm }}" --activity "$ACT" --repeat "$REP" --output "out/${ACT}-${REP}.json"
+              python3 - "$ACT" "$REP" <<'PY'
+          import json,os,sys
+          a,r=sys.argv[1:]
+          path=f"out/{a}-{r}.json"
+          with open(path) as f: result=json.load(f)
+          rate=float(os.environ["REFERENCE_EUR_PER_HOUR"])
+          cost=rate*result["duration_s"]/3600
+          result["reference_cost_eur"]=cost
+          result["reference_ses_per_1000_eur_preliminary"]=(1000*result["valid_sessions_preliminary"]/cost) if cost else None
+          result["reference_cost_not_actual_runner"]=True
+          with open(path,"w") as f: json.dump(result,f,indent=2)
+          print("SES_REFERENCE",a,r,result["valid_sessions_preliminary"],cost,flush=True)
+          PY
+              kill "$PID" 2>/dev/null || true
+              wait "$PID" 2>/dev/null || true
+              trap - EXIT
+            done
+          done
+      - name: Upload original evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: kairos-first-load-${{ matrix.arm }}
+          path: out/
+          retention-days: 30
