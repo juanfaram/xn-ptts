@@ -1,0 +1,58 @@
+name: KAIROS M0 fragment integrity and strong direct32 control
+on:
+  push:
+    branches: ['run/kairos-economic-verdict']
+    paths: ['.github/workflows/kairos-m0-fragment-control.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  measure:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Frozen original and runtime identity
+        run: |
+          set -euo pipefail
+          mkdir -p out/m0-control
+          git fetch origin e5110afd3ead725c940b6411eec4985fb8b111aa --depth=1
+          git diff --exit-code e5110afd3ead725c940b6411eec4985fb8b111aa HEAD -- ptts/src ptts-ws-server/src ptts-ws-server/Cargo.toml
+          { git rev-parse HEAD; lscpu; nproc; } > out/m0-control/env.txt
+          python3 -m py_compile scripts/kairos_multiturn.py scripts/kairos_m0_fragment_audit.py
+      - name: Install model
+        run: |
+          python3 -m pip install --user huggingface_hub 'websockets>=13,<17'
+          python3 - <<'PY'
+          from huggingface_hub import snapshot_download
+          snapshot_download(repo_id="gradium/phonon-31m-en",local_dir="phonon-model")
+          PY
+      - name: Compile frozen Phonon
+        run: cargo build --release -p ptts-ws-server
+      - name: Compare FIFO with strong direct32 control, store every fragment
+        shell: bash
+        run: |
+          set -euo pipefail
+          RUST_LOG=info ./target/release/ptts-ws-server --model phonon-model --voice-catalog '' --lang en --device cpu --max-concurrent-requests 32 --addr 127.0.0.1:8080 > out/m0-control/server.log 2>&1 &
+          server_pid=$!
+          sleep 5
+          mkdir -p out/m0-control/fifo_expire out/m0-control/direct32
+          python3 scripts/kairos_fifo_proxy.py --policy fifo_expire --slots 3 --max-queue 64 --timeout 1 --max-clients 24 --port 8081 > out/m0-control/fifo_expire/proxy.log 2>&1 &
+          proxy_pid=$!
+          sleep 2
+          python3 scripts/kairos_multiturn.py --url ws://127.0.0.1:8081/speech/tts --arm fifo_expire --activities 0.10 --repeats 4 --short-ms 200 --long-ms 200 --sessions 20 --idle 2 --trace --save-fragments --output out/m0-control/fifo_expire | tee out/m0-control/fifo_expire/run.log
+          kill "$proxy_pid"; wait "$proxy_pid" || true
+          python3 scripts/kairos_multiturn.py --url ws://127.0.0.1:8080/speech/tts --arm direct32 --activities 0.10 --repeats 4 --short-ms 200 --long-ms 200 --sessions 20 --idle 2 --save-fragments --output out/m0-control/direct32 | tee out/m0-control/direct32/run.log
+          kill "$server_pid"; wait "$server_pid" || true
+      - name: Independent fragment-level audit
+        run: python3 scripts/kairos_m0_fragment_audit.py --root out/m0-control | tee out/m0-control/audit.log
+      - name: Upload evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: kairos-m0-fragment-control-evidence
+          path: out/m0-control/
+          retention-days: 30
