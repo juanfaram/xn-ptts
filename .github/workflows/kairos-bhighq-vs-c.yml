@@ -10,7 +10,7 @@ jobs:
       matrix:
         include:
           - label: BHIGHQ2
-            arm: B
+            arm: Q
             permits: 2
             occupancy: 8
             sessions: 16
@@ -43,7 +43,7 @@ jobs:
         if: matrix.arm == 'C'
         run: python3 scripts/kairos_patch_ws_c.py
       - name: Apply B-high+Q control patch only for B
-        if: matrix.arm == 'B'
+        if: matrix.arm == 'Q'
         run: python3 scripts/kairos_patch_ws_bhigh_q.py
       - name: Build server once
         env:
