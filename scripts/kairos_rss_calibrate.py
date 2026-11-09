@@ -29,11 +29,13 @@ async def main(a):
     held=[];rows=[];ram=ram_kib();budget=.8*ram
     async def sample(n,phase):
         await asyncio.sleep(a.settle)
+        alive=sum(not ws.closed for ws in held)
+        if alive!=n:raise RuntimeError(f"expected {n} live WS, found {alive}")
         readings=[]
         for _ in range(5):
             readings.append(rss_kib(a.pid))
             await asyncio.sleep(.2)
-        row={"connections":n,"phase":phase,"rss_kib":max(readings),"rss_mib":round(max(readings)/1024,3),"rss_samples_kib":readings,"monotonic_s":time.monotonic()}
+        row={"connections":n,"live_connections":alive,"phase":phase,"rss_kib":max(readings),"rss_mib":round(max(readings)/1024,3),"rss_samples_kib":readings,"monotonic_s":time.monotonic()}
         rows.append(row)
         output.write_text(json.dumps({"rows":rows},indent=2)+"\n")
         print(json.dumps(row),flush=True)
@@ -74,7 +76,7 @@ async def main(a):
                 "warning":"Extrapolated cap is not measured capacity; reserve RAM for proxy, OS and other processes; RSS includes model warmup and allocator effects."}
         (output.parent/"rss-capacity.json").write_text(json.dumps(report,indent=2)+"\n")
         print(json.dumps({k:v for k,v in report.items() if k!="measurements"},indent=2),flush=True)
-        if not fit_accepted:print("INVALID FIT: do not use extrapolated cap",flush=True)
+        if not fit_accepted:raise RuntimeError("INVALID FIT: do not use extrapolated cap")
     finally:
         await asyncio.gather(*(ws.close() for ws in held),return_exceptions=True)
         held.clear()
@@ -83,6 +85,6 @@ if __name__=="__main__":
     p=argparse.ArgumentParser()
     p.add_argument("--url",default="ws://127.0.0.1:8080/speech/tts")
     p.add_argument("--pid",type=int,required=True)
-    p.add_argument("--settle",type=float,default=1.5)
+    p.add_argument("--settle",type=float,default=5.0)
     p.add_argument("--output",default="out/rss-calibration/rows.json")
     asyncio.run(main(p.parse_args()))
