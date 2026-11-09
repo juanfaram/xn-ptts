@@ -148,7 +148,7 @@ async def main(args):
 if __name__=="__main__":
     p=argparse.ArgumentParser()
     p.add_argument("--url",default="ws://127.0.0.1:8080/speech/tts")
-    p.add_argument("--arm",choices=["B","C"],default="B")
+    p.add_argument("--arm",choices=["B","C","Q"],default="B")
     p.add_argument("--permits",type=int,default=8)
     p.add_argument("--idle-seconds",type=float,default=30)
     p.add_argument("--occupancy",type=int,default=8)
