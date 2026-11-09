@@ -1,0 +1,57 @@
+name: KAIROS original server idle RSS calibration
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  rss:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Compile calibration before expensive work
+        run: python3 -m py_compile scripts/kairos_rss_calibrate.py
+      - name: Freeze original source
+        run: |
+          git fetch origin e5110afd3ead725c940b6411eec4985fb8b111aa --depth=1
+          git diff --exit-code e5110afd3ead725c940b6411eec4985fb8b111aa HEAD -- ptts/src ptts-ws-server/src ptts-ws-server/Cargo.toml
+      - name: Install dependencies
+        run: python3 -m pip install 'websockets>=13,<17' huggingface_hub
+      - name: Build original server
+        run: cargo build --release -p ptts-ws-server
+      - name: Download model
+        run: |
+          python3 - <<'PY'
+          from huggingface_hub import snapshot_download
+          snapshot_download(repo_id="gradium/phonon-31m-en",local_dir="phonon-model")
+          PY
+      - name: Start server and measure
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p out
+          sha256sum target/release/ptts-ws-server scripts/kairos_rss_calibrate.py > out/identity.sha256
+          RAYON_NUM_THREADS="$(nproc)" ./target/release/ptts-ws-server --addr 127.0.0.1:8080 --model phonon-model --lang en --device cpu --max-concurrent-requests 128 --voice-dir phonon-model > out/server.log 2>&1 &
+          PID=$!
+          trap 'kill "$PID" 2>/dev/null || true' EXIT
+          python3 - <<'PY'
+          import socket,time
+          for _ in range(120):
+              try:
+                  s=socket.create_connection(("127.0.0.1",8080),timeout=1)
+                  s.close()
+                  break
+              except OSError:time.sleep(1)
+          else:raise SystemExit("server failed to start")
+          PY
+          python3 scripts/kairos_rss_calibrate.py --pid "$PID" --output out/rss-calibration.json
+      - name: Preserve evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: kairos-original-rss-calibration
+          path: out/
+          retention-days: 30
