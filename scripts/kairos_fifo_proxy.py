@@ -24,12 +24,14 @@ class FIFO:
             if not f.done():
                 self.active+=1;self.max_active=max(self.max_active,self.active);f.set_result(True)
     async def acquire(self,deadline_ms=None):
+        budget=self.timeout if deadline_ms is None else min(self.timeout,max(0,float(deadline_ms)/1000))
+        if budget<=0:raise asyncio.TimeoutError()
         f=asyncio.get_running_loop().create_future()
         async with self.lock:
             if len(self.waiters)>=self.max_queue:raise QueueFull()
             self.waiters.append(f);self.pump()
         try:
-            await asyncio.wait_for(asyncio.shield(f),self.timeout)
+            await asyncio.wait_for(asyncio.shield(f),budget)
         except BaseException:
             async with self.lock:
                 if f.done() and not f.cancelled():self.active-=1
