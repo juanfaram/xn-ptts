@@ -38,7 +38,7 @@ async fn acquire_edf(permits: Arc<tokio::sync::Semaphore>, deadline: Instant) ->
     let id=state.next.fetch_add(1, Ordering::SeqCst);
     {
         let mut q=state.queue.lock().unwrap();
-        if q.len()>=64 { return None; }
+        if q.len()>=64 { tracing::warn!("KAIROS_REJECT_QUEUE_FULL"); return None; }
         q.push((id,deadline));
     }
     let waiting=EdfWaiting { id, state: state.clone() };
@@ -46,19 +46,24 @@ async fn acquire_edf(permits: Arc<tokio::sync::Semaphore>, deadline: Instant) ->
         let notified=state.notify.notified();
         tokio::pin!(notified);
         notified.as_mut().enable(); // register before checking queue
-        if Instant::now()>=deadline { return None; }
+        if Instant::now()>=deadline { tracing::warn!("KAIROS_REJECT_DEADLINE"); return None; }
         let permit={
             let q=state.queue.lock().unwrap();
             let first=q.iter().min_by_key(|(seq,d)| (*d,*seq)).map(|(seq,_)| *seq);
             if first==Some(id) { permits.clone().try_acquire_owned().ok() } else { None }
         };
         if let Some(permit)=permit {
+            if Instant::now()>=deadline {
+                drop(permit);
+                tracing::warn!("KAIROS_REJECT_DEADLINE_AT_HEAD");
+                return None;
+            }
             drop(waiting);
             return Some(EdfLease { permit:Some(permit), state:state.clone() });
         }
         tokio::select! {
             _ = &mut notified => {},
-            _ = tokio::time::sleep_until(tokio::time::Instant::from_std(deadline)) => return None,
+            _ = tokio::time::sleep_until(tokio::time::Instant::from_std(deadline)) => { tracing::warn!("KAIROS_REJECT_DEADLINE"); return None; },
         }
     }
 }
@@ -144,6 +149,17 @@ mod kairos_edf_tests {
         drop(short_lease);
         let long_lease=tokio::time::timeout(Duration::from_millis(500),long).await.unwrap().unwrap().unwrap();
         drop(long_lease);
+        assert_eq!(sem.available_permits(),1);
+    }
+    #[tokio::test]
+    async fn deadline_at_release_boundary_is_never_admitted() {
+        let sem=Arc::new(tokio::sync::Semaphore::new(1));
+        let blocker=sem.clone().acquire_owned().await.unwrap();
+        let deadline=Instant::now()+Duration::from_millis(35);
+        let waiter=tokio::spawn(acquire_edf(sem.clone(),deadline));
+        tokio::time::sleep_until(tokio::time::Instant::from_std(deadline)).await;
+        drop(blocker);
+        assert!(waiter.await.unwrap().is_none());
         assert_eq!(sem.available_permits(),1);
     }
     #[tokio::test]
