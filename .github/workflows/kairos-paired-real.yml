@@ -72,6 +72,19 @@ jobs:
           PY
               python3 scripts/kairos_paired_ws_runner.py --warmup --arm "${{ matrix.arm }}" --activity "$ACT" --repeat "$REP" --timeout 180
               python3 scripts/kairos_paired_ws_runner.py --arm "${{ matrix.arm }}" --activity "$ACT" --repeat "$REP" --output "out/${ACT}-${REP}.json"
+              python3 - "$ACT" "$REP" <<'PY'
+          import json,os,sys
+          a,r=sys.argv[1:]
+          path=f"out/{a}-{r}.json"
+          with open(path) as f: result=json.load(f)
+          rate=float(os.environ["REFERENCE_EUR_PER_HOUR"])
+          cost=rate*result["duration_s"]/3600
+          result["reference_cost_eur"]=cost
+          result["reference_ses_per_1000_eur_preliminary"]=(1000*result["valid_sessions_preliminary"]/cost) if cost else None
+          result["reference_cost_not_actual_runner"]=True
+          with open(path,"w") as f: json.dump(result,f,indent=2)
+          print("SES_REFERENCE",a,r,result["valid_sessions_preliminary"],cost,flush=True)
+          PY
               kill "$PID" 2>/dev/null || true
               wait "$PID" 2>/dev/null || true
               trap - EXIT
