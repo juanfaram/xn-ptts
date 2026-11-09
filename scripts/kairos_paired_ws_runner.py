@@ -96,9 +96,13 @@ async def run(args):
     duration=time.perf_counter()-started
     turns=[t for s in results for t in s["turns"]]
     assert len(turns)==SESSIONS*TURNS
-    valid=sum(t.get("status")=="ok" and t.get("deadline_met") and t.get("fragments_complete") for t in turns)
+    def valid_turn(t):
+        return t.get("status")=="ok" and t.get("deadline_met") and t.get("fragments_complete")
+    valid=sum(valid_turn(t) for t in turns)
+    valid_sessions=sum(len(x["turns"])==TURNS and all(valid_turn(t) for t in x["turns"]) for x in results)
     return {"arm":args.arm,"activity_pct":args.activity,"repeat":args.repeat,"duration_s":duration,
             "offered":len(turns),"valid_preliminary":valid,"failed":len(turns)-valid,
+            "offered_sessions":SESSIONS,"valid_sessions_preliminary":valid_sessions,
             "note":"Preliminary only: full C1-C4 SES certification requires frozen offline analyzer",
             "sessions":results}
 
@@ -119,5 +123,5 @@ def main():
     out=asyncio.run(run(args))
     dest=Path(args.output);dest.parent.mkdir(parents=True,exist_ok=True)
     dest.write_text(json.dumps(out,indent=2)+"\n")
-    print(json.dumps({k:out[k] for k in ("arm","activity_pct","repeat","duration_s","offered","valid_preliminary","failed")}))
+    print(json.dumps({k:out[k] for k in ("arm","activity_pct","repeat","duration_s","offered","valid_preliminary","failed","offered_sessions","valid_sessions_preliminary")}))
 if __name__=="__main__":main()
