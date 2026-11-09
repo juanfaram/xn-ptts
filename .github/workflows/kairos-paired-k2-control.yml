@@ -1,0 +1,65 @@
+name: KAIROS paired direct32 vs generation-gated FIFO k2
+on:
+  push:
+    branches: ['run/kairos-m1-preregistered-capture']
+    paths: ['.github/workflows/kairos-paired-k2-control.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  paired:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Frozen original verification
+        run: |
+          set -euo pipefail
+          mkdir -p out/paired-k2
+          git fetch origin e5110afd3ead725c940b6411eec4985fb8b111aa --depth=1
+          git diff --exit-code e5110afd3ead725c940b6411eec4985fb8b111aa HEAD -- ptts/src ptts-ws-server/src ptts-ws-server/Cargo.toml
+          python3 -m py_compile scripts/kairos_multiturn.py scripts/kairos_fifo_proxy.py scripts/kairos_paired_k2_verdict.py
+          { git rev-parse HEAD; lscpu; nproc; } > out/paired-k2/identity.txt
+      - name: Install model
+        run: |
+          python3 -m pip install --user huggingface_hub 'websockets>=13,<17'
+          python3 - <<'PY'
+          from huggingface_hub import snapshot_download
+          snapshot_download(repo_id="gradium/phonon-31m-en",local_dir="phonon-model")
+          PY
+      - name: Compile original
+        run: cargo build --release -p ptts-ws-server
+      - name: Start direct32 server
+        run: |
+          set -euo pipefail
+          ./target/release/ptts-ws-server --model phonon-model --voice-catalog '' --lang en --device cpu --max-concurrent-requests 32 --addr 127.0.0.1:8080 > out/paired-k2/server.log 2>&1 &
+          python3 - <<'PY'
+          import socket,time
+          for _ in range(120):
+              try:
+                  s=socket.create_connection(("127.0.0.1",8080),timeout=1);s.close();break
+              except OSError:time.sleep(1)
+          else:raise SystemExit("server unavailable")
+          PY
+      - name: Measure both arms with identical k2 offered sessions
+        run: |
+          set -euo pipefail
+          mkdir -p out/paired-k2/direct32 out/paired-k2/fifo_expire
+          python3 scripts/kairos_multiturn.py --activities 0.10 --repeats 5 --short-ms 200 --long-ms 200 --sessions 20 --idle 2 --capture-fragments --url ws://127.0.0.1:8080/speech/tts --arm direct32 --output out/paired-k2/direct32 | tee out/paired-k2/direct32/run.log
+          python3 -u scripts/kairos_fifo_proxy.py --policy fifo_expire --slots 2 --max-queue 64 --timeout 1 --max-clients 32 --port 8081 > out/paired-k2/fifo_expire/proxy.log 2>&1 &
+          proxy_pid=$!
+          sleep 2
+          python3 scripts/kairos_multiturn.py --activities 0.10 --repeats 5 --short-ms 200 --long-ms 200 --sessions 20 --idle 2 --capture-fragments --url ws://127.0.0.1:8081/speech/tts --arm fifo_expire --output out/paired-k2/fifo_expire | tee out/paired-k2/fifo_expire/run.log
+          kill "$proxy_pid"; wait "$proxy_pid" || true
+      - name: Paired strict verdict
+        run: python3 scripts/kairos_paired_k2_verdict.py out/paired-k2 | tee out/paired-k2/verdict.log
+      - name: Upload evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: kairos-paired-k2-control-evidence
+          path: out/paired-k2/
+          retention-days: 30
