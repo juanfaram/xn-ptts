@@ -1,9 +1,15 @@
 # Memory-derived connection cap = 134 (80% RAM); with only 60 offered sessions
 # it is NOT reached. Memory-density advantage is OUTSIDE this experiment.
 # Policy differential: Q=FIFO, C=EDF. Rejections count as failures.
+# Price frozen 2026-11-09: Hetzner CCX23 EU 4 dedicated vCPU / 16 GB,
+# EUR 0.1378/hour excl VAT. Official provider:
+# https://docs.hetzner.com/general/infrastructure-and-availability/price-adjustment/
+# Reference equivalent only, NOT the actual GitHub Actions runner price.
 name: KAIROS paired real-Phonon pilot B8 Q3 D3 C3
 on:
   workflow_dispatch:
+env:
+  REFERENCE_EUR_PER_HOUR: '0.1378'
 permissions:
   contents: read
 jobs:
