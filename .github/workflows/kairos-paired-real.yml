@@ -1,3 +1,15 @@
+# NON-COMPARABILITY: previous run offered 85 independent requests;
+# this run offers 60 persistent sessions x 3 turns = 180 generations per repetition.
+# Do NOT compare raw 14/48/54/54 historical counts to this run.
+# SES ACCOUNTING: each of 60 offered sessions is counted exactly once.
+# A session is valid ONLY if all three generations are valid; a single rejected,
+# expired, timed-out, late, or interrupted generation invalidates the whole session.
+# Every rejected session stays in the denominator, including HTTP 429 handshake.
+# Q uses fixed 80ms admission timeout; D/C use client deadlines. Interpret Q's
+# timeout failures separately; do not attribute them to FIFO ordering alone.
+# 240ms reachability must be measured and reported, not assumed from smoke.
+# Any incomplete matrix arm or repetition is INCOMPLETE, never a complete comparison.
+# Decision: C-D confidence interval crossing zero means NO demonstrated EDF advantage.
 # Memory-derived connection cap = 134 (80% RAM); with only 60 offered sessions
 # it is NOT reached. Memory-density advantage is OUTSIDE this experiment.
 # Policy differential: Q=FIFO, C=EDF. Rejections count as failures.
