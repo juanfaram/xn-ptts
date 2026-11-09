@@ -136,30 +136,54 @@ class Proxy:
         # Only one flush per session at a time, with concurrent reply forwarding.
         completion=asyncio.Event()
         active=False
+        current_trace=None
+        admitted_ns=None
+        async def release_traced(reason):
+            nonlocal active,current_trace,admitted_ns
+            if not active:return
+            active=False
+            t_release_ns=time.monotonic_ns()
+            if current_trace is not None:
+                print(json.dumps({"event":"release","trace_id":current_trace,
+                    "t_release_ns":t_release_ns,"t_admission_ns":admitted_ns,
+                    "hold_ms":round((t_release_ns-admitted_ns)/1e6,4),
+                    "reason":reason,"policy":self.policy}),flush=True)
+            current_trace=None;admitted_ns=None
+            await self.fifo.release()
         async def inbound():
-            nonlocal active
+            nonlocal active,current_trace,admitted_ns
             async for raw in client:
                 req=json.loads(raw);typ=req.get("type")
                 if typ in ("flush","end_of_stream"):
                     trace_id=req.pop("kairos_trace_id",None)
                     t_enqueue_ns=time.monotonic_ns()
+                    if trace_id is not None:
+                        print(json.dumps({"event":"arrival","trace_id":trace_id,"t_enqueue_ns":t_enqueue_ns,
+                            "deadline_ms":req.get("deadline_ms"),"policy":self.policy}),flush=True)
                     try:await self.fifo.acquire(req.get("deadline_ms"))
                     except QueueFull:
+                        if trace_id is not None:
+                            print(json.dumps({"event":"rejection","trace_id":trace_id,
+                                "t_reject_ns":time.monotonic_ns(),"t_enqueue_ns":t_enqueue_ns,
+                                "reason":"queue_full","policy":self.policy}),flush=True)
                         await client.send(json.dumps({"type":"error","code":429,"message":"generation queue full","retry_after_seconds":self.retry_after}))
                         continue
                     except asyncio.TimeoutError:
+                        if trace_id is not None:
+                            print(json.dumps({"event":"rejection","trace_id":trace_id,
+                                "t_reject_ns":time.monotonic_ns(),"t_enqueue_ns":t_enqueue_ns,
+                                "reason":"deadline_expired","policy":self.policy}),flush=True)
                         await client.send(json.dumps({"type":"error","code":408,"message":"generation queue deadline exceeded","retry_after_seconds":self.retry_after}))
                         continue
                     t_admission_ns=time.monotonic_ns()
                     if trace_id is not None:
                         print(json.dumps({"event":"admission","trace_id":trace_id,"t_enqueue_ns":t_enqueue_ns,"t_admission_ns":t_admission_ns,"queue_ms":round((t_admission_ns-t_enqueue_ns)/1e6,4),"policy":self.policy}),flush=True)
-                    active=True;completion.clear()
+                    active=True;current_trace=trace_id;admitted_ns=t_admission_ns;completion.clear()
                     try:
                         await backend.send(json.dumps(req) if trace_id is not None else raw)
                         await completion.wait()
                     finally:
-                        if active:
-                            active=False;await self.fifo.release()
+                        await release_traced("inbound_cleanup")
                 else:await backend.send(raw)
         async def outbound():
             nonlocal active
@@ -167,13 +191,13 @@ class Proxy:
                 msg=json.loads(raw)
                 await client.send(raw)
                 if active and msg.get("type") in ("flushed","end_of_stream","error"):
-                    active=False;await self.fifo.release();completion.set()
+                    await release_traced(msg.get("type"));completion.set()
         tasks=[asyncio.create_task(inbound()),asyncio.create_task(outbound())]
         try:await asyncio.wait(tasks,return_when=asyncio.FIRST_COMPLETED)
         finally:
             for t in tasks:t.cancel()
             await asyncio.gather(*tasks,return_exceptions=True)
-            if active:active=False;await self.fifo.release()
+            await release_traced("connection_cleanup")
 
 async def main(a):
     if not a.upstream.startswith(("ws://127.0.0.1:","ws://localhost:")):raise SystemExit("local-only upstream")
