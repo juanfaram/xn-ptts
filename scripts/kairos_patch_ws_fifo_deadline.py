@@ -57,10 +57,16 @@ replace("    let seed = app.seed_base ^ (stream_id as u64).wrapping_mul(0x9E3779
     }
     tracing::info!(stream_id, queue_wait_ms = queue_started.elapsed().as_secs_f64() * 1000.0, "KAIROS_BHIGH_Q_GENERATION_ADMITTED");
     let seed = app.seed_base ^ (stream_id as u64).wrapping_mul(0x9E3779B97F4A7C15);""")
-replace("TtsRequest::Flush { flush_id },","TtsRequest::Flush { flush_id, deadline_ms },")
+replace("TtsRequest::Flush { flush_id },","TtsRequest::Flush { flush_id, deadline_ms, deadline_unix_ms },")
 replace("""                flush_buffer(&app, session, text_buffer, stream_id, encoder, reply_tx, cancel)
                     .await?;
-                let _ = reply_tx.send(TtsReply::Flushed { flush_id }).await;""","""                let deadline = std::time::Instant::now() + Duration::from_millis(deadline_ms.unwrap_or(1000));
+                let _ = reply_tx.send(TtsReply::Flushed { flush_id }).await;""","""                let deadline = {
+                    let remaining=deadline_unix_ms.map(|ms| {
+                        let now=std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_millis() as u64;
+                        ms.saturating_sub(now)
+                    }).unwrap_or(deadline_ms.unwrap_or(1000));
+                    std::time::Instant::now() + Duration::from_millis(remaining)
+                };
                 flush_buffer(&app, session, text_buffer, stream_id, encoder, reply_tx, cancel, Some(deadline))
                     .await?;
                 let _ = reply_tx.send(TtsReply::Flushed { flush_id }).await;""")
@@ -146,5 +152,5 @@ print("FIFO+deadline discard applied: 134 connections, fixed generation permits 
 proto=Path("ptts-ws-server/src/protocol.rs")
 ptext=proto.read_text()
 assert ptext.count("    Flush {\n        flush_id: u64,\n    },")==1
-ptext=ptext.replace("    Flush {\n        flush_id: u64,\n    },","    Flush {\n        flush_id: u64,\n        #[serde(default)]\n        deadline_ms: Option<u64>,\n    },")
+ptext=ptext.replace("    Flush {\n        flush_id: u64,\n    },","    Flush {\n        flush_id: u64,\n        #[serde(default)]\n        deadline_ms: Option<u64>,\n        #[serde(default)]\n        deadline_unix_ms: Option<u64>,\n    },")
 proto.write_text(ptext)
