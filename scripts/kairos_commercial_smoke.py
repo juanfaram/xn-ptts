@@ -74,32 +74,31 @@ async def main(a):
     (out/"reference.sha256").write_text(hashlib.sha256(ref).hexdigest()+"\n")
     rows=[]
     from contextlib import AsyncExitStack
-    async with AsyncExitStack() as stack:
-      clients=[]
-      for i in range(a.sessions):
-        ws=await stack.enter_async_context(connect(a.url,open_timeout=10,max_size=2**23))
-        await ws.send(json.dumps({"type":"setup","json_config":"","model_name":"","output_format":"pcm","voice":None,"voice_id":None,"voice_emb":None}))
-        while True:
-          msg=json.loads(await ws.recv())
-          if msg["type"]=="error":raise RuntimeError("setup failed "+str(msg))
-          if msg["type"]=="ready":break
-        clients.append(ws)
-      for activity in (.10,.25,.50):
-        # Persistent idle sessions; activity selects generators within the same connected population.
-        # 20 sessions, one generation each; activity 10/25/50 -> 2/5/10 active per wave.
+    for activity in (.10,.25,.50):
         concurrency=round(a.sessions*activity)
         for rep in range(0,6):
-            rng=random.Random(20261109+int(activity*1000)*100+rep)
-            ids=list(range(a.sessions));rng.shuffle(ids)
-            offered=ids[:concurrency]
-            deadlines={i:(150 if j%10<3 else 1000) for j,i in enumerate(offered)}
-            t=time.perf_counter()
-            tasks=[one(clients[i],i,deadlines[i],ref,a.timeout) for i in offered]
-            results=await asyncio.gather(*tasks)
-            row={"activity":activity,"repeat":rep,"warmup":rep==0,"offered":len(offered),"valid":sum(r["valid"] for r in results),"rejected":sum(r["status"]=="rejected" for r in results),"failed":sum(not r["valid"] for r in results),"elapsed_s":time.perf_counter()-t,"ttfa_p99_ms":pct([r["ttfa_ms"] for r in results if "ttfa_ms" in r],.99),"requests":results}
-            rows.append(row)
-            (out/"runs.json").write_text(json.dumps(rows,indent=2)+"\n")
-            print(json.dumps({k:v for k,v in row.items() if k!="requests"}),flush=True)
+            # Fresh sessions on every wave: stream_id=0 in ALL arms, matching
+            # the direct-server reference. No hidden seed drift across waves.
+            async with AsyncExitStack() as stack:
+                clients=[]
+                for i in range(a.sessions):
+                    ws=await stack.enter_async_context(connect(a.url,open_timeout=10,max_size=2**23))
+                    await ws.send(json.dumps({"type":"setup","json_config":"","model_name":"","output_format":"pcm","voice":None,"voice_id":None,"voice_emb":None}))
+                    while True:
+                        msg=json.loads(await ws.recv())
+                        if msg["type"]=="error":raise RuntimeError("setup failed "+str(msg))
+                        if msg["type"]=="ready":break
+                    clients.append(ws)
+                rng=random.Random(20261109+int(activity*1000)*100+rep)
+                ids=list(range(a.sessions));rng.shuffle(ids)
+                offered=ids[:concurrency]
+                deadlines={i:(150 if j%10<3 else 1000) for j,i in enumerate(offered)}
+                t=time.perf_counter()
+                results=await asyncio.gather(*(one(clients[i],i,deadlines[i],ref,a.timeout) for i in offered))
+                row={"activity":activity,"desired_simultaneous_generators":concurrency,"repeat":rep,"warmup":rep==0,"offered":len(offered),"valid":sum(r["valid"] for r in results),"rejected":sum(r["status"]=="rejected" for r in results),"failed":sum(not r["valid"] for r in results),"elapsed_s":time.perf_counter()-t,"ttfa_p99_ms":pct([r["ttfa_ms"] for r in results if "ttfa_ms" in r],.99),"requests":results}
+                rows.append(row)
+                (out/"runs.json").write_text(json.dumps(rows,indent=2)+"\\n")
+                print(json.dumps({k:v for k,v in row.items() if k!="requests"}),flush=True)
     measured=[r for r in rows if not r["warmup"]]
     summary={"direct_pair_max_abs_lsb":direct_lsb,"model":"provisional real Phonon FIFO/EDF; M0 virtual; one generation per offered session","rows":[{k:v for k,v in r.items() if k!="requests"} for r in measured],"offered":sum(r["offered"] for r in measured),"valid":sum(r["valid"] for r in measured),"rejected":sum(r["rejected"] for r in measured),"elapsed_s":sum(r["elapsed_s"] for r in measured),"warning":"No cost assigned, no multi-generation sessions, no sustained load; do not claim commercial SES/eur"}
     (out/"summary.json").write_text(json.dumps(summary,indent=2)+"\n")
