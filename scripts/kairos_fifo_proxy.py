@@ -3,15 +3,19 @@
 Upstream original server must have max_concurrent_requests >= max_clients.
 No Phonon code changes. Admission queue includes full flush->flushed lifetime.
 """
-import argparse,asyncio,json,logging,time
+import argparse,asyncio,json,logging,time,math
 from collections import deque
 from contextlib import suppress
 from websockets.asyncio.client import connect
 from websockets.asyncio.server import serve
 
+class QueueFull(Exception):
+    pass
+
 class FIFO:
-    def __init__(self,slots,timeout):
-        if slots<1 or timeout<=0:raise ValueError("invalid capacity/timeout")
+    def __init__(self,slots,timeout,max_queue=64):
+        if slots<1 or timeout<=0 or max_queue<1:raise ValueError("invalid capacity/timeout/queue")
+        self.max_queue=max_queue
         self.slots=slots;self.timeout=timeout;self.active=0;self.max_active=0
         self.waiters=deque();self.lock=asyncio.Lock()
     def pump(self):
@@ -22,6 +26,7 @@ class FIFO:
     async def acquire(self,deadline_ms=None):
         f=asyncio.get_running_loop().create_future()
         async with self.lock:
+            if len(self.waiters)>=self.max_queue:raise QueueFull()
             self.waiters.append(f);self.pump()
         try:
             await asyncio.wait_for(asyncio.shield(f),self.timeout)
@@ -38,8 +43,8 @@ class FIFO:
             self.active-=1;self.pump()
 
 class EDF(FIFO):
-    def __init__(self,slots,timeout):
-        super().__init__(slots,timeout)
+    def __init__(self,slots,timeout,max_queue=64):
+        super().__init__(slots,timeout,max_queue)
         self.deadlines={}
     def pump(self):
         while self.waiters:
@@ -59,6 +64,7 @@ class EDF(FIFO):
         if budget<=0:raise asyncio.TimeoutError()
         f=asyncio.get_running_loop().create_future()
         async with self.lock:
+            if len(self.waiters)>=self.max_queue:raise QueueFull()
             self.deadlines[f]=time.monotonic()+budget
             self.waiters.append(f);self.pump()
         try:await asyncio.wait_for(asyncio.shield(f),budget)
@@ -72,11 +78,11 @@ class EDF(FIFO):
             raise
 
 class Proxy:
-    def __init__(self,upstream,slots,timeout,max_clients,policy="fifo"):
+    def __init__(self,upstream,slots,timeout,max_clients,policy="fifo",max_queue=64):
         if policy not in ("fifo","edf"):raise ValueError("unknown policy")
         self.policy=policy
-        self.upstream=upstream;self.fifo=(FIFO if policy=="fifo" else EDF)(slots,timeout)
-        self.clients=asyncio.Semaphore(max_clients);self.retry_after=max(1,int(timeout))
+        self.upstream=upstream;self.fifo=(FIFO if policy=="fifo" else EDF)(slots,timeout,max_queue)
+        self.clients=asyncio.Semaphore(max_clients);self.retry_after=max(1,math.ceil(timeout))
     async def handle(self,client):
         try:await asyncio.wait_for(self.clients.acquire(),.01)
         except asyncio.TimeoutError:
@@ -96,8 +102,11 @@ class Proxy:
                 req=json.loads(raw);typ=req.get("type")
                 if typ in ("flush","end_of_stream"):
                     try:await self.fifo.acquire(req.get("deadline_ms"))
+                    except QueueFull:
+                        await client.send(json.dumps({"type":"error","code":429,"message":"generation queue full","retry_after_seconds":self.retry_after}))
+                        continue
                     except asyncio.TimeoutError:
-                        await client.send(json.dumps({"type":"error","code":408,"message":"FIFO deadline exceeded","retry_after_seconds":self.retry_after}))
+                        await client.send(json.dumps({"type":"error","code":408,"message":"generation queue deadline exceeded","retry_after_seconds":self.retry_after}))
                         continue
                     active=True;completion.clear()
                     try:
@@ -123,7 +132,7 @@ class Proxy:
 
 async def main(a):
     if not a.upstream.startswith(("ws://127.0.0.1:","ws://localhost:")):raise SystemExit("local-only upstream")
-    proxy=Proxy(a.upstream,a.slots,a.timeout,a.max_clients,a.policy)
+    proxy=Proxy(a.upstream,a.slots,a.timeout,a.max_clients,a.policy,a.max_queue)
     async with serve(proxy.handle,"127.0.0.1",a.port,max_size=2**23):
         print("B-high+Q ready",flush=True)
         await asyncio.Future()
@@ -135,4 +144,5 @@ if __name__=="__main__":
     p.add_argument("--slots",type=int,default=3)
     p.add_argument("--timeout",type=float,default=.2)
     p.add_argument("--max-clients",type=int,default=32)
+    p.add_argument("--max-queue",type=int,default=64)
     asyncio.run(main(p.parse_args()))
