@@ -1,0 +1,101 @@
+name: KAIROS SLA frontier 10 15 percent
+on:
+  push:
+    branches: ['run/kairos-sla-frontier-10-15']
+    paths: ['.github/workflows/kairos-sla-frontier-10-15.yml', 'scripts/kairos_multiturn.py', 'scripts/kairos_economic_verdict.py', 'scripts/kairos_fifo_proxy.py']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  sweep:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 110
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Frozen source and environment audit
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p out/sla-frontier
+          git fetch origin e5110afd3ead725c940b6411eec4985fb8b111aa --depth=1
+          git diff --exit-code e5110afd3ead725c940b6411eec4985fb8b111aa HEAD -- ptts/src ptts-ws-server/src ptts-ws-server/Cargo.toml
+          { git rev-parse HEAD; git log --oneline -3; nproc; lscpu; free -m; } > out/sla-frontier/env.txt
+          python3 -m py_compile scripts/kairos_multiturn.py scripts/kairos_fifo_proxy.py scripts/kairos_economic_verdict.py scripts/kairos_sla_frontier_verdict.py
+      - name: Download model and dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m pip install --user huggingface_hub 'websockets>=13,<17'
+          python3 - <<'PY'
+          from huggingface_hub import snapshot_download
+          snapshot_download(repo_id="gradium/phonon-31m-en",local_dir="phonon-model")
+          PY
+          find phonon-model -type f | sort > out/sla-frontier/model-files.txt
+      - name: Compile original server
+        run: cargo build --release -p ptts-ws-server
+      - name: Start original WS server m8
+        shell: bash
+        run: |
+          set -euo pipefail
+          RUST_LOG=info ./target/release/ptts-ws-server --model phonon-model --voice-catalog '' --lang en --device cpu --max-concurrent-requests 32 --addr 127.0.0.1:8080 > out/sla-frontier/server.log 2>&1 &
+          echo $! > out/sla-frontier/server.pid
+          python3 - <<'PY'
+          import socket,time,subprocess
+          for i in range(120):
+              if subprocess.run(["kill","-0",open("out/sla-frontier/server.pid").read().strip()],capture_output=True).returncode:
+                  raise SystemExit("server exited")
+              try:
+                  s=socket.create_connection(("127.0.0.1",8080),timeout=1);s.close();break
+              except OSError:time.sleep(1)
+          else:raise SystemExit("server did not start")
+          PY
+      - name: Four-turn real Phonon conversations, FIFO-expire and EDF
+        shell: bash
+        run: |
+          set -euo pipefail
+          for policy in fifo_expire edf; do
+            mkdir -p "out/sla-frontier/$policy"
+            python3 scripts/kairos_fifo_proxy.py --policy "$policy" --slots 3 --max-queue 64 --timeout 1 --max-clients 24 --port 8081 > "out/sla-frontier/$policy/proxy.log" 2>&1 &
+            proxy_pid=$!
+            sleep 2
+            python3 scripts/kairos_multiturn.py --url ws://127.0.0.1:8081/speech/tts --arm "$policy" --activities 0.10 0.15 --sessions 20 --idle 20 --output "out/sla-frontier/$policy" | tee "out/sla-frontier/$policy/run.log"
+            kill "$proxy_pid"
+            wait "$proxy_pid" || true
+            sleep 2
+          done
+      - name: B8 original 4-turn contextual baseline
+        shell: bash
+        run: |
+          set -euo pipefail
+          kill "$(cat out/sla-frontier/server.pid)"
+          sleep 2
+          RUST_LOG=info ./target/release/ptts-ws-server --model phonon-model --voice-catalog '' --lang en --device cpu --max-concurrent-requests 8 --addr 127.0.0.1:8080 > out/sla-frontier/server-b8.log 2>&1 &
+          sleep 2
+          mkdir -p out/sla-frontier/b8
+          python3 scripts/kairos_multiturn.py --url ws://127.0.0.1:8080/speech/tts --arm b8 --allow-admission-rejects --activities 0.10 0.15 --sessions 20 --idle 20 --output out/sla-frontier/b8 | tee out/sla-frontier/b8/run.log
+      - name: SLA gate at 10 and 15 percent
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 scripts/kairos_sla_frontier_verdict.py out/sla-frontier | tee out/sla-frontier/sla-verdict.log
+      - name: Paired economic verdict with bootstrap uncertainty
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 scripts/kairos_economic_verdict.py --root out/sla-frontier --price 0.1378 | tee out/sla-frontier/economic-verdict.log
+      - name: Freeze source and binary identity
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          { git rev-parse HEAD; sha256sum scripts/kairos_multiturn.py scripts/kairos_fifo_proxy.py scripts/kairos_playback_v2.py scripts/kairos_economic_verdict.py scripts/kairos_sla_frontier_verdict.py; sha256sum target/release/ptts-ws-server || true; } > out/sla-frontier/identity.txt
+      - name: Upload evidence even on failure
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: kairos-sla-frontier-evidence
+          path: out/sla-frontier/
+          retention-days: 30
