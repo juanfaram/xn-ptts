@@ -67,8 +67,8 @@ async def reference(url):
         return bytes(pcm)
 async def main(a):
     out=Path(a.output);out.mkdir(parents=True,exist_ok=True)
-    ref=await reference(a.url)
-    ref2=await reference(a.url)
+    ref=await reference(a.reference_url)
+    ref2=await reference(a.reference_url)
     direct_lsb=lsb(ref,ref2)
     (out/"direct-determinism.json").write_text(json.dumps({"direct_pair_max_abs_lsb":direct_lsb,"reference_bytes":len(ref),"reference2_bytes":len(ref2),"sha1":hashlib.sha256(ref).hexdigest(),"sha2":hashlib.sha256(ref2).hexdigest()},indent=2)+"\n")
     (out/"reference.sha256").write_text(hashlib.sha256(ref).hexdigest()+"\n")
@@ -106,6 +106,7 @@ async def main(a):
 if __name__=="__main__":
     p=argparse.ArgumentParser()
     p.add_argument("--url",default="ws://127.0.0.1:8081/speech/tts")
+    p.add_argument("--reference-url",default="ws://127.0.0.1:8080/speech/tts")
     p.add_argument("--sessions",type=int,default=20)
     p.add_argument("--timeout",type=float,default=30)
     p.add_argument("--output",required=True)
