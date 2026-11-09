@@ -1,0 +1,65 @@
+name: KAIROS minimal idle-state eviction pilot
+on:
+  push:
+    branches: ['run/kairos-session-eviction-minimal']
+    paths: ['ptts-ws-server/src/handler.rs', 'scripts/kairos_session_eviction_pilot.py', 'scripts/kairos_session_eviction_verdict.py', '.github/workflows/kairos-session-eviction-minimal.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  pilot:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 75
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Preflight and frozen engine verification
+        run: |
+          set -euo pipefail
+          mkdir -p out/session-eviction
+          git fetch origin e5110afd3ead725c940b6411eec4985fb8b111aa --depth=1
+          git diff --exit-code e5110afd3ead725c940b6411eec4985fb8b111aa HEAD -- ptts/src
+          python3 -m py_compile scripts/kairos_session_eviction_pilot.py scripts/kairos_session_eviction_verdict.py scripts/kairos_multiturn.py
+          { git rev-parse HEAD; nproc; lscpu; free -m; } > out/session-eviction/env.txt
+      - name: Install model
+        run: |
+          python3 -m pip install --user huggingface_hub 'websockets>=13,<17'
+          python3 - <<'PY'
+          from huggingface_hub import snapshot_download
+          snapshot_download(repo_id="gradium/phonon-31m-en",local_dir="phonon-model")
+          PY
+      - name: Compile experimental opt-in server
+        run: cargo build --release -p ptts-ws-server
+      - name: Matched four-turn control and eviction
+        shell: bash
+        run: |
+          set -euo pipefail
+          for arm in control evict; do
+            mkdir -p "out/session-eviction/$arm"
+            if [ "$arm" = evict ]; then export KAIROS_EVICT_AFTER_FLUSH=1; else export KAIROS_EVICT_AFTER_FLUSH=0; fi
+            RUST_LOG=info ./target/release/ptts-ws-server --model phonon-model --voice-catalog '' --lang en --device cpu --max-concurrent-requests 8 --addr 127.0.0.1:8080 > "out/session-eviction/$arm/server.log" 2>&1 &
+            pid=$!
+            python3 - <<'PY'
+          import socket,time
+          for _ in range(120):
+              try:
+                  s=socket.create_connection(("127.0.0.1",8080),timeout=1);s.close();break
+              except OSError:time.sleep(1)
+          else:raise SystemExit("server failed to start")
+          PY
+            python3 scripts/kairos_session_eviction_pilot.py --pid "$pid" --arm "$arm" --idle 20 --output "out/session-eviction/$arm" | tee "out/session-eviction/$arm/client.log"
+            kill "$pid"
+            wait "$pid" || true
+            sleep 2
+          done
+      - name: Strict PCM TTFA M1 and RSS verdict
+        run: python3 scripts/kairos_session_eviction_verdict.py out/session-eviction
+      - name: Upload all evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: kairos-session-eviction-minimal-evidence
+          path: out/session-eviction/
+          retention-days: 30
