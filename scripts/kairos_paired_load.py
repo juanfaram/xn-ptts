@@ -13,13 +13,17 @@ FRAGMENTS_EXPECTED=42
 def schedule(activity, repeat):
     rng=random.Random(f"{SEED}:{activity}:{repeat}")
     events=[]
-    # Fixed 60 sessions; active fraction is a Bernoulli opportunity per turn.
-    # All offered turns remain in the denominator, including idle opportunities.
+    # All 180 generations are offered; activity controls arrival density, not denominator.
+    # This is a synthetic offered-load proxy, not a measured user activity percentage.
+    deadlines=[150]*54+[1000]*126
+    rng.shuffle(deadlines
+    )
+    spacing_ms=1000//activity
     for turn in range(TURNS):
         for session in range(SESSIONS):
-            active=rng.randrange(100)<activity
-            events.append({"session":session,"turn":turn,"offer_ms":turn*1000+session*10,
-                           "active":active,"deadline_ms":150 if rng.randrange(10)<3 else 1000})
+            idx=turn*SESSIONS+session
+            events.append({"session":session,"turn":turn,"offer_ms":idx*spacing_ms,
+                           "active":True,"deadline_ms":deadlines[idx]})
     return events
 
 def test():
@@ -30,6 +34,7 @@ def test():
             assert len({(e["session"],e["turn"]) for e in x})==180
             assert x==schedule(a,rep)
             assert all(e["deadline_ms"] in (150,1000) for e in x)
+            assert sum(e["deadline_ms"]==150 for e in x)==54
     print("schedule tests OK")
 
 def main():
