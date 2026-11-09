@@ -23,10 +23,13 @@ async def setup(url):
         m=json.loads(await ws.recv())
         if m["type"]=="error":raise RuntimeError(str(m))
         if m["type"]=="ready":return ws
-async def generate(ws,turn,deadline_ms,reference=None):
+async def generate(ws,turn,deadline_ms,reference=None,trace_id=None):
     await ws.send(json.dumps({"type":"text","text":TEXT}))
     t0=time.perf_counter()
-    await ws.send(json.dumps({"type":"flush","flush_id":turn+1,"deadline_ms":deadline_ms}))
+    t_request_ns=time.monotonic_ns()
+    request={"type":"flush","flush_id":turn+1,"deadline_ms":deadline_ms}
+    if trace_id is not None:request["kairos_trace_id"]=trace_id
+    await ws.send(json.dumps(request))
     raw=bytearray();frags=[];first=None
     while True:
         m=json.loads(await ws.recv())
@@ -42,7 +45,7 @@ async def generate(ws,turn,deadline_ms,reference=None):
     ttfa=(first-t0)*1000
     episodes=simulate(frags)["episode_count"]
     difference=lsb(reference,bytes(raw)) if reference is not None else None
-    return {"status":"completed","ttfa_ms":round(ttfa,3),"m0_episodes":episodes,
+    return {"status":"completed","trace_id":trace_id,"t_request_ns":t_request_ns,"t_first_audio_ns":int(first*1e9),"ttfa_ms":round(ttfa,3),"m0_episodes":episodes,
             "max_abs_lsb":difference,"pcm_sha256":hashlib.sha256(raw).hexdigest(),
             "valid":ttfa<=deadline_ms and episodes==0 and difference is not None and difference<=1,
             "_pcm":bytes(raw)}
@@ -76,7 +79,7 @@ async def wave(a,ref,activity,rep):
             async def one(i):
                 if clients[i] is None:return {"status":"rejected","code":429,"valid":False}
                 try:
-                    return await asyncio.wait_for(generate(clients[i],turn,deadlines[i],ref[turn]),timeout=25)
+                    return await asyncio.wait_for(generate(clients[i],turn,deadlines[i],ref[turn],f"{a.arm}:{activity}:{rep}:{i}:{turn}" if a.trace else None),timeout=25)
                 except Exception as exc:return {"status":"error","error":repr(exc),"valid":False}
             batch=await asyncio.gather(*(one(i) for i in offered))
             for i,x in zip(offered,batch):
@@ -94,8 +97,8 @@ async def main(a):
     ref=await refs(a.reference_url)
     (out/"reference-sha256.json").write_text(json.dumps([hashlib.sha256(v).hexdigest() for v in ref],indent=2)+"\n")
     rows=[]
-    for activity in (.10,.25,.50):
-        for rep in range(6):
+    for activity in a.activities:
+        for rep in range(a.repeats):
             row=await wave(a,ref,activity,rep)
             rows.append(row)
             (out/"runs.json").write_text(json.dumps(rows,indent=2)+"\n")
@@ -116,6 +119,9 @@ if __name__=="__main__":
     p.add_argument("--arm",required=True)
     p.add_argument("--sessions",type=int,default=20)
     p.add_argument("--idle",type=float,default=20)
+    p.add_argument("--trace",action="store_true")
+    p.add_argument("--activities",type=float,nargs="+",default=[.10,.25,.50])
+    p.add_argument("--repeats",type=int,default=6)
     p.add_argument("--short-ms",type=int,default=240)
     p.add_argument("--long-ms",type=int,default=1000)
     p.add_argument("--allow-admission-rejects",action="store_true")
