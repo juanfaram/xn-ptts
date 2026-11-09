@@ -75,10 +75,16 @@ change("    let permit = match app.requests.clone().try_acquire_owned() {",'''  
     let permit = match connections.clone().try_acquire_owned() {''')
 change("const REPLY_QUEUE: usize = 16;",'''static CONNECTIONS: OnceLock<Arc<tokio::sync::Semaphore>> = OnceLock::new();
 const REPLY_QUEUE: usize = 16;''')
-change("TtsRequest::Flush { flush_id },","TtsRequest::Flush { flush_id, deadline_ms },")
+change("TtsRequest::Flush { flush_id },","TtsRequest::Flush { flush_id, deadline_ms, deadline_unix_ms },")
 change('''                flush_buffer(&app, session, text_buffer, stream_id, encoder, reply_tx, cancel)
                     .await?;
-                let _ = reply_tx.send(TtsReply::Flushed { flush_id }).await;''','''                let deadline = Instant::now() + Duration::from_millis(deadline_ms.unwrap_or(1000));
+                let _ = reply_tx.send(TtsReply::Flushed { flush_id }).await;''','''                let deadline = {
+                    let remaining=deadline_unix_ms.map(|ms| {
+                        let now=std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_millis() as u64;
+                        ms.saturating_sub(now)
+                    }).unwrap_or(deadline_ms.unwrap_or(1000));
+                    Instant::now() + Duration::from_millis(remaining)
+                };
                 flush_buffer(&app, session, text_buffer, stream_id, encoder, reply_tx, cancel, Some(deadline))
                     .await?;
                 let _ = reply_tx.send(TtsReply::Flushed { flush_id }).await;''')
@@ -184,6 +190,6 @@ p.write_text(s)
 proto=Path("ptts-ws-server/src/protocol.rs")
 t=proto.read_text()
 assert t.count("    Flush {\n        flush_id: u64,\n    },")==1
-t=t.replace("    Flush {\n        flush_id: u64,\n    },","    Flush {\n        flush_id: u64,\n        #[serde(default)]\n        deadline_ms: Option<u64>,\n    },")
+t=t.replace("    Flush {\n        flush_id: u64,\n    },","    Flush {\n        flush_id: u64,\n        #[serde(default)]\n        deadline_ms: Option<u64>,\n        #[serde(default)]\n        deadline_unix_ms: Option<u64>,\n    },")
 proto.write_text(t)
 print("C EDF applied; deadline from Flush; queue 64; connection cap 134")
