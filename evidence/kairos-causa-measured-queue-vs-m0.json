@@ -1,0 +1,69 @@
+{
+  "schema": "kairos-causa-measured-latency-m0-attribution-v1",
+  "source_run": 42639479145,
+  "artifact_id": 13685553373,
+  "arm": "fifo_expire",
+  "method": "join completed turn trace_id with proxy admission monotonic timestamps, exclude warmup",
+  "units": "ms",
+  "regimes": {
+    "idle20": {
+      "0.1": {
+        "completed": 16,
+        "queue_p95": 0.43,
+        "admit_to_audio_p95": 60.11,
+        "m0_turns": 8,
+        "m0_when_queue_lt_1ms": 8,
+        "pcm_fail": 0
+      },
+      "0.25": {
+        "completed": 40,
+        "queue_p95": 497.03,
+        "admit_to_audio_p95": 75.47,
+        "m0_turns": 13,
+        "m0_when_queue_lt_1ms": 11,
+        "pcm_fail": 0
+      },
+      "0.5": {
+        "completed": 60,
+        "queue_p95": 960.94,
+        "admit_to_audio_p95": 84.39,
+        "m0_turns": 26,
+        "m0_when_queue_lt_1ms": 8,
+        "pcm_fail": 4
+      }
+    },
+    "idle2": {
+      "0.1": {
+        "completed": 16,
+        "queue_p95": 0.41,
+        "admit_to_audio_p95": 60.28,
+        "m0_turns": 4,
+        "m0_when_queue_lt_1ms": 4,
+        "pcm_fail": 0
+      },
+      "0.25": {
+        "completed": 40,
+        "queue_p95": 500.68,
+        "admit_to_audio_p95": 74.27,
+        "m0_turns": 16,
+        "m0_when_queue_lt_1ms": 14,
+        "pcm_fail": 0
+      },
+      "0.5": {
+        "completed": 60,
+        "queue_p95": 963.02,
+        "admit_to_audio_p95": 77.02,
+        "m0_turns": 24,
+        "m0_when_queue_lt_1ms": 11,
+        "pcm_fail": 2
+      }
+    }
+  },
+  "decision": "Two separate gates: admission queue causes high TTFA at higher load; M0 stalls persist even with sub-ms queue and sub-200ms TTFA. Do not claim fixing queue alone fixes complete sessions.",
+  "limitations": [
+    "Completed-turn conditional measures; rejected turns excluded from these distributions but included in SES denominator",
+    "Virtual M0 playback, not physical playback",
+    "Causal attribution observational; controlled queue intervention not yet demonstrated",
+    "PCM failures in this run mean quality gate is not met"
+  ]
+}
