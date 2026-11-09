@@ -143,7 +143,7 @@ where
 
 enum SessionState {
     Awaiting,
-    Ready { session: Session, text_buffer: String, stream_id: u32, encoder: Box<Encoder> },
+    Ready { session: Option<Session>, voice_name: String, text_buffer: String, stream_id: u32, encoder: Box<Encoder> },
 }
 
 async fn run_session(
@@ -220,10 +220,10 @@ async fn run_session(
                 }
             }
             (
-                SessionState::Ready { session, text_buffer, stream_id, encoder },
+                SessionState::Ready { session, voice_name, text_buffer, stream_id, encoder },
                 TtsRequest::Flush { flush_id },
             ) => {
-                flush_buffer(&app, session, text_buffer, stream_id, encoder, reply_tx, cancel)
+                flush_with_optional_eviction(&app, session, voice_name, text_buffer, stream_id, encoder, reply_tx, cancel)
                     .await?;
                 let _ = reply_tx.send(TtsReply::Flushed { flush_id }).await;
             }
@@ -240,6 +240,35 @@ async fn run_session(
         }
     }
     tracing::info!("websocket stream closed by client");
+    Ok(())
+}
+
+// Experimental only: keep WebSocket and stream counter, drop the prepared KV session
+// after each completed flush. Default path is unchanged unless env flag is set.
+async fn flush_with_optional_eviction(
+    app: &AppState,
+    session: &mut Option<Session>,
+    voice_name: &str,
+    text_buffer: &mut String,
+    stream_id: &mut u32,
+    encoder: &mut Encoder,
+    reply_tx: &mpsc::Sender<TtsReply>,
+    cancel: &mut watch::Receiver<bool>,
+) -> Result<()> {
+    if text_buffer.is_empty() { return Ok(()); }
+    if session.is_none() {
+        let opts = SpeechOptions::default()
+            .voice(voice_name.to_string())
+            .max_tokens_per_chunk(ptts::plan::MAX_FIT_TOKENS);
+        let start = std::time::Instant::now();
+        *session = Some(app.synth.session(&opts, app.max_seq_len)?);
+        tracing::info!(event="kairos_rebuild", rebuild_ms=start.elapsed().as_secs_f64()*1000.0);
+    }
+    flush_buffer(app, session.as_ref().expect("reconstructed"), text_buffer, stream_id, encoder, reply_tx, cancel).await?;
+    if std::env::var("KAIROS_EVICT_AFTER_FLUSH").as_deref()==Ok("1") {
+        *session = None;
+        tracing::info!(event="kairos_evicted");
+    }
     Ok(())
 }
 
@@ -362,7 +391,8 @@ async fn handle_setup(
         }
     }
     Ok(Some(SessionState::Ready {
-        session,
+        session: Some(session),
+        voice_name,
         text_buffer: String::new(),
         stream_id: 0,
         encoder: Box::new(encoder),
