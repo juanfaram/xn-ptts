@@ -39,6 +39,9 @@ jobs:
         run: |
           if [ "${{ matrix.arm }}" = Q ]; then python3 scripts/kairos_patch_ws_bhigh_q.py; fi
           if [ "${{ matrix.arm }}" = C ]; then python3 scripts/kairos_patch_ws_c_edf.py; fi
+      - name: Verify FIFO order in Q
+        if: matrix.arm == 'Q'
+        run: cargo test --release -p ptts-ws-server kairos_fifo_tests -- --test-threads=1
       - name: Verify EDF scheduling and expiry in C
         if: matrix.arm == 'C'
         run: cargo test --release -p ptts-ws-server kairos_edf_tests -- --test-threads=1
