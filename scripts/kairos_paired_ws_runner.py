@@ -112,7 +112,8 @@ async def run(args):
     valid_sessions=sum(len(x["turns"])==TURNS and all(valid_turn(t) for t in x["turns"]) for x in results)
     return {"arm":args.arm,"activity_pct":args.activity,"repeat":args.repeat,"duration_s":duration,
             "offered":len(turns),"valid_preliminary":valid,"failed":len(turns)-valid,
-            "offered_sessions":SESSIONS,"valid_sessions_preliminary":valid_sessions,\n            "rejection_counts":rejection_counts,
+            "offered_sessions":SESSIONS,"valid_sessions_preliminary":valid_sessions,
+            "rejection_counts":rejection_counts,
             "note":"Preliminary only: full C1-C4 SES certification requires frozen offline analyzer",
             "sessions":results}
 
