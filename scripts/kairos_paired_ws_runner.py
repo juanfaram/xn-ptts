@@ -131,7 +131,9 @@ async def run(args):
             "offered":len(turns),"valid_preliminary":valid,"failed":len(turns)-valid,
             "offered_sessions":SESSIONS,"valid_sessions_preliminary":valid_sessions,
             "rejection_counts":rejection_counts,
-            "reach_240_count":reached_240,"reach_240_rate":reach_240_rate,\n            "reach_240_gate_80pct":reach_240_rate>=0.8,\n            "invalid_sessions_by_primary_reason":invalid_by_reason,
+            "reach_240_count":reached_240,"reach_240_rate":reach_240_rate,
+            "reach_240_gate_80pct":reach_240_rate>=0.8,
+            "invalid_sessions_by_primary_reason":invalid_by_reason,
             "note":"Preliminary only: full C1-C4 SES certification requires frozen offline analyzer",
             "sessions":results}
 
