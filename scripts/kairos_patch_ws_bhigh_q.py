@@ -51,5 +51,37 @@ replace("    let seed = app.seed_base ^ (stream_id as u64).wrapping_mul(0x9E3779
     tracing::info!(stream_id, queue_wait_ms = queue_started.elapsed().as_secs_f64() * 1000.0, "KAIROS_BHIGH_Q_GENERATION_ADMITTED");
     let seed = app.seed_base ^ (stream_id as u64).wrapping_mul(0x9E3779B97F4A7C15);""")
 replace("    outcome.and(generated)\n}", "    drop(permit);\n    outcome.and(generated)\n}")
+s += """
+#[cfg(test)]
+mod kairos_fifo_tests {
+    #[tokio::test]
+    async fn earlier_long_deadline_is_admitted_before_later_short() {
+        use std::sync::Arc;
+        use tokio::sync::Semaphore;
+        use std::time::Duration;
+        let sem=Arc::new(Semaphore::new(1));
+        let blocker=sem.clone().acquire_owned().await.unwrap();
+        let (tx,mut rx)=tokio::sync::mpsc::channel(2);
+        let first=sem.clone();let a=tx.clone();
+        let long=tokio::spawn(async move {
+            let permit=first.acquire_owned().await.unwrap();
+            a.send("long").await.unwrap();
+            tokio::time::sleep(Duration::from_millis(20)).await;
+            drop(permit);
+        });
+        tokio::time::sleep(Duration::from_millis(20)).await;
+        let second=sem.clone();
+        let short=tokio::spawn(async move {
+            let _permit=second.acquire_owned().await.unwrap();
+            tx.send("short").await.unwrap();
+        });
+        tokio::time::sleep(Duration::from_millis(20)).await;
+        drop(blocker);
+        assert_eq!(tokio::time::timeout(Duration::from_secs(1),rx.recv()).await.unwrap(),Some("long"));
+        long.await.unwrap();short.await.unwrap();
+        assert_eq!(sem.available_permits(),1);
+    }
+}
+"""
 p.write_text(s)
 print("B-high+Q applied: 134 connections, fixed generation permits configured as 3, FIFO queue 64, 80ms deadline")
