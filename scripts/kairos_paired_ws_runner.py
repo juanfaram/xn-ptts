@@ -23,7 +23,7 @@ async def warmup(args):
             if r.get("type")=="audio":chunks+=1
             if r.get("type")=="flushed" and r.get("flush_id")==1:break
             if r.get("type")=="error":raise RuntimeError("warmup generation "+str(r))
-        if not chunks:raise RuntimeError("warmup no audio")
+        if chunks!=42:raise RuntimeError(f"warmup incomplete: {chunks} chunks; expected 42")
         print(json.dumps({"warmup_discarded":True,"chunks":chunks}),flush=True)
 
 async def client(i,args,events,t0):
