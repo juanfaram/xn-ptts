@@ -92,7 +92,7 @@ async def main(a):
                 rng=random.Random(20261109+int(activity*1000)*100+rep)
                 ids=list(range(a.sessions));rng.shuffle(ids)
                 offered=ids[:concurrency]
-                deadlines={i:(150 if j%10<3 else 1000) for j,i in enumerate(offered)}
+                deadlines={i:(a.short_deadline_ms if j%10<3 else a.long_deadline_ms) for j,i in enumerate(offered)}
                 t=time.perf_counter()
                 results=await asyncio.gather(*(one(clients[i],i,deadlines[i],ref,a.timeout) for i in offered))
                 row={"activity":activity,"desired_simultaneous_generators":concurrency,"repeat":rep,"warmup":rep==0,"offered":len(offered),"valid":sum(r["valid"] for r in results),"rejected":sum(r["status"]=="rejected" for r in results),"failed":sum(not r["valid"] for r in results),"elapsed_s":time.perf_counter()-t,"ttfa_p99_ms":pct([r["ttfa_ms"] for r in results if "ttfa_ms" in r],.99),"requests":results}
@@ -106,6 +106,8 @@ if __name__=="__main__":
     p=argparse.ArgumentParser()
     p.add_argument("--url",default="ws://127.0.0.1:8081/speech/tts")
     p.add_argument("--reference-url",default="ws://127.0.0.1:8080/speech/tts")
+    p.add_argument("--short-deadline-ms",type=int,default=240)
+    p.add_argument("--long-deadline-ms",type=int,default=1000)
     p.add_argument("--sessions",type=int,default=20)
     p.add_argument("--timeout",type=float,default=30)
     p.add_argument("--output",required=True)
