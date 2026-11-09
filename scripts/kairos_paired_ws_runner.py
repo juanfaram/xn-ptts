@@ -46,7 +46,8 @@ async def client(i,args,events,t0):
             out["turns"].append(result)
             try:
                 await ws.send(json.dumps({"type":"text","text":TEXT}))
-                await ws.send(json.dumps({"type":"flush","flush_id":ev["turn"]+1,"deadline_ms":ev["deadline_ms"]}))
+                await ws.send(json.dumps({"type":"flush","flush_id":ev["turn"]+1,"deadline_ms":ev["deadline_ms"],
+                                         "deadline_unix_ms":int(time.time()*1000)+ev["deadline_ms"]}))
                 while True:
                     r=json.loads(await asyncio.wait_for(ws.recv(),args.timeout))
                     stamp=time.perf_counter_ns()
