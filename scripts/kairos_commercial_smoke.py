@@ -25,16 +25,11 @@ def m1(frags):
         if gap>buffer:episodes.append({"idx":i,"duration_ms":gap-buffer})
         buffer=max(0,buffer-gap)+durations[i]
     return {"episode_count":len(episodes),"total_stall_ms":sum(e["duration_ms"] for e in episodes),"episodes":episodes}
-async def one(url,session_id,deadline_ms,reference,timeout):
+async def one(ws,session_id,deadline_ms,reference,timeout):
     start=time.perf_counter()
     try:
         async with asyncio.timeout(timeout):
-            async with connect(url,open_timeout=10,max_size=2**23) as ws:
-                await ws.send(json.dumps({"type":"setup","json_config":"","model_name":"","output_format":"pcm","voice":None,"voice_id":None,"voice_emb":None}))
-                while True:
-                    msg=json.loads(await ws.recv())
-                    if msg["type"]=="error":raise RuntimeError("setup "+str(msg))
-                    if msg["type"]=="ready":break
+            if True:
                 await ws.send(json.dumps({"type":"text","text":TEXT}))
                 t0=time.perf_counter()
                 await ws.send(json.dumps({"type":"flush","flush_id":session_id+1,"deadline_ms":deadline_ms}))
@@ -75,8 +70,19 @@ async def main(a):
     ref=await reference(a.url)
     (out/"reference.sha256").write_text(hashlib.sha256(ref).hexdigest()+"\n")
     rows=[]
-    for activity in (.10,.25,.50):
-        # Fixed offered sessions, independent of policy; activity selects simultaneous generators.
+    from contextlib import AsyncExitStack
+    async with AsyncExitStack() as stack:
+      clients=[]
+      for i in range(a.sessions):
+        ws=await stack.enter_async_context(connect(a.url,open_timeout=10,max_size=2**23))
+        await ws.send(json.dumps({"type":"setup","json_config":"","model_name":"","output_format":"pcm","voice":None,"voice_id":None,"voice_emb":None}))
+        while True:
+          msg=json.loads(await ws.recv())
+          if msg["type"]=="error":raise RuntimeError("setup failed "+str(msg))
+          if msg["type"]=="ready":break
+        clients.append(ws)
+      for activity in (.10,.25,.50):
+        # Persistent idle sessions; activity selects generators within the same connected population.
         # 20 sessions, one generation each; activity 10/25/50 -> 2/5/10 active per wave.
         concurrency=round(a.sessions*activity)
         for rep in range(0,6):
@@ -85,7 +91,7 @@ async def main(a):
             offered=ids[:concurrency]
             deadlines={i:(150 if j%10<3 else 1000) for j,i in enumerate(offered)}
             t=time.perf_counter()
-            tasks=[one(a.url,i,deadlines[i],ref,a.timeout) for i in offered]
+            tasks=[one(clients[i],i,deadlines[i],ref,a.timeout) for i in offered]
             results=await asyncio.gather(*tasks)
             row={"activity":activity,"repeat":rep,"warmup":rep==0,"offered":len(offered),"valid":sum(r["valid"] for r in results),"rejected":sum(r["status"]=="rejected" for r in results),"failed":sum(not r["valid"] for r in results),"elapsed_s":time.perf_counter()-t,"ttfa_p99_ms":pct([r["ttfa_ms"] for r in results if "ttfa_ms" in r],.99),"requests":results}
             rows.append(row)
