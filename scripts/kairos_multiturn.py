@@ -88,7 +88,7 @@ async def wave(a,ref,activity,rep):
             if turn<3:await asyncio.sleep(a.idle)
         elapsed=time.perf_counter()-start
     useful=sum(all(x["valid"] for x in outcomes[i]) for i in offered)
-    return {"activity":activity,"repeat":rep,"warmup":rep==0,"offered_sessions":n,
+    return {"activity":activity,"repeat":rep,"warmup":rep==0 and a.repeats>1,"offered_sessions":n,
             "useful_sessions":useful,"invalid_sessions":n-useful,
             "rejected_turns":sum(x["status"]=="rejected" for v in outcomes.values() for x in v),
             "elapsed_s":elapsed,"turns":outcomes}
