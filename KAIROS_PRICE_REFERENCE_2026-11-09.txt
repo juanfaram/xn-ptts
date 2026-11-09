@@ -1,0 +1,8 @@
+KAIROS indicative cloud tariff, fixed 2026-11-09
+Provider: Hetzner Cloud, Germany/Finland, CCX23 (4 dedicated vCPU, 16 GB RAM).
+Official published post-2026-06-15 price: EUR 0.1378/hour, EUR 85.99/month, excl VAT, excl IPv4.
+Source: https://docs.hetzner.com/general/infrastructure-and-availability/price-adjustment/
+IMPORTANT: NOT the measured GitHub Actions runner price. EPYC 7763 CI is not guaranteed equivalent to CCX23. Use for scenario economics only until benchmark runs on billed hardware.
+SES/EUR = measured sustained useful sessions/hour divided by actual EUR/hour.
+Cost per 1000 useful sessions = 1000 * actual EUR/hour / measured sustained useful sessions/hour.
+Do not divide by workflow wall clock (model download, compilation, and 20s intentional idle across short test batches).
