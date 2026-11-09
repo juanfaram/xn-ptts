@@ -65,7 +65,8 @@ async def wave(a,ref,activity,rep):
         for i in range(a.sessions):
             try:
                 ws=await setup(a.url)
-                clients[i]=await stack.enter_async_context(ws)
+                clients[i]=ws
+                stack.push_async_callback(ws.close)
             except Exception:
                 if not a.allow_admission_rejects:raise
                 clients[i]=None
