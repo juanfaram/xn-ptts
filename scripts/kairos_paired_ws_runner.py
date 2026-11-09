@@ -32,22 +32,27 @@ async def client(i,args,events,t0):
     try:
         ws=await asyncio.wait_for(websockets.connect(args.url,open_timeout=10,max_size=2**22),timeout=15)
         out["connected"]=True
+        out["setup_start_ns"]=time.perf_counter_ns()
         await ws.send(json.dumps(SETUP))
         while True:
             r=json.loads(await asyncio.wait_for(ws.recv(),15))
-            if r.get("type")=="ready":break
+            if r.get("type")=="ready":
+                out["setup_ready_ns"]=time.perf_counter_ns()
+                break
             if r.get("type")=="error":raise RuntimeError(str(r))
         for ev in events:
             scheduled=t0+ev["offer_ms"]/1000
             await asyncio.sleep(max(0,scheduled-time.perf_counter()))
             start=time.perf_counter_ns()
-            result={"turn":ev["turn"],"deadline_ms":ev["deadline_ms"],"request_ns":start,
+            result={"turn":ev["turn"],"deadline_ms":ev["deadline_ms"],"scheduled_offer_ms":ev["offer_ms"],
+                    "offer_lag_ms":max(0,(start/1e9-scheduled)*1000),"request_ns":start,
                     "first_audio_ns":None,"chunks":[],"status":"error"}
             out["turns"].append(result)
             try:
                 await ws.send(json.dumps({"type":"text","text":TEXT}))
                 await ws.send(json.dumps({"type":"flush","flush_id":ev["turn"]+1,"deadline_ms":ev["deadline_ms"],
                                          "deadline_unix_ms":int(time.time()*1000)+ev["deadline_ms"]}))
+                result["flush_sent_ns"]=time.perf_counter_ns()
                 while True:
                     r=json.loads(await asyncio.wait_for(ws.recv(),args.timeout))
                     stamp=time.perf_counter_ns()
@@ -57,9 +62,11 @@ async def client(i,args,events,t0):
                         result["chunks"].append({"arrival_ns":stamp,"frag_ms":1000*(r["stop_s"]-r["start_s"]),
                             "bytes":len(raw),"sha256":hashlib.sha256(raw).hexdigest()})
                     elif r.get("type")=="flushed" and r.get("flush_id")==ev["turn"]+1:
-                        result["status"]="ok";break
+                        result["status"]="ok";result["flushed_ns"]=stamp;break
                     elif r.get("type")=="error":
-                        result["error"]=str(r);break
+                        result["error"]=str(r);result["error_ns"]=stamp;break
+                if result["chunks"]:
+                    result["last_audio_ns"]=result["chunks"][-1]["arrival_ns"]
                 if result["first_audio_ns"] is not None:
                     result["ttfa_request_ms"]=(result["first_audio_ns"]-start)/1e6
                     result["deadline_met"]=result["ttfa_request_ms"]<=ev["deadline_ms"]
@@ -101,6 +108,9 @@ async def run(args):
         return t.get("status")=="ok" and t.get("deadline_met") and t.get("fragments_complete")
     valid=sum(valid_turn(t) for t in turns)
     reached_240=sum(t.get("ttfa_request_ms",float("inf"))<=240 for t in turns)
+    attempted=[t for t in turns if "request_ns" in t]
+    offer_lags=sorted(t["offer_lag_ms"] for t in attempted)
+    def p95(values):return values[min(len(values)-1,int(.95*(len(values)-1)))] if values else None
     reach_240_rate=reached_240/len(turns)
     invalid_by_reason={"connection":0,"queue":0,"deadline":0,"timeout":0,"ttfa":0,"audio":0,"other":0}
     for sess in results:
@@ -131,6 +141,9 @@ async def run(args):
             "offered":len(turns),"valid_preliminary":valid,"failed":len(turns)-valid,
             "offered_sessions":SESSIONS,"valid_sessions_preliminary":valid_sessions,
             "rejection_counts":rejection_counts,
+            "attempted_generations":len(attempted),
+            "not_attempted_generations":len(turns)-len(attempted),
+            "offer_lag_p95_ms":p95(offer_lags),
             "reach_240_count":reached_240,"reach_240_rate":reach_240_rate,
             "reach_240_gate_80pct":reach_240_rate>=0.8,
             "invalid_sessions_by_primary_reason":invalid_by_reason,
