@@ -1,0 +1,80 @@
+name: KAIROS decisive idle connections B8 vs generation k1
+on:
+  push:
+    branches: ['run/kairos-m1-preregistered-capture']
+    paths: ['.github/workflows/kairos-idle-connections-k1.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  compare:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 55
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Verify frozen source
+        run: |
+          set -euo pipefail
+          mkdir -p out/idle-k1
+          git fetch origin e5110afd3ead725c940b6411eec4985fb8b111aa --depth=1
+          git diff --exit-code e5110afd3ead725c940b6411eec4985fb8b111aa HEAD -- ptts/src ptts-ws-server/src ptts-ws-server/Cargo.toml
+          python3 -m py_compile scripts/kairos_multiturn.py scripts/kairos_fifo_proxy.py
+          { git rev-parse HEAD; lscpu; nproc; } > out/idle-k1/env.txt
+      - name: Install model
+        run: |
+          python3 -m pip install --user huggingface_hub 'websockets>=13,<17'
+          python3 - <<'PY'
+          from huggingface_hub import snapshot_download
+          snapshot_download(repo_id="gradium/phonon-31m-en",local_dir="phonon-model")
+          PY
+      - name: Compile original
+        run: cargo build --release -p ptts-ws-server
+      - name: Run original B8 with 20 persistent sessions, 1 active
+        run: |
+          set -euo pipefail
+          mkdir -p out/idle-k1/b8 out/idle-k1/fifo_k1
+          ./target/release/ptts-ws-server --model phonon-model --voice-catalog '' --lang en --device cpu --max-concurrent-requests 8 --addr 127.0.0.1:8080 > out/idle-k1/b8/server.log 2>&1 &
+          pid=$!
+          sleep 5
+          python3 scripts/kairos_multiturn.py --activities 0.05 --repeats 5 --short-ms 200 --long-ms 200 --sessions 20 --idle 2 --allow-admission-rejects --capture-fragments --url ws://127.0.0.1:8080/speech/tts --arm b8 --output out/idle-k1/b8 | tee out/idle-k1/b8/run.log
+          kill "$pid"; wait "$pid" || true
+          sleep 2
+          ./target/release/ptts-ws-server --model phonon-model --voice-catalog '' --lang en --device cpu --max-concurrent-requests 32 --addr 127.0.0.1:8080 > out/idle-k1/fifo_k1/server.log 2>&1 &
+          pid=$!
+          sleep 5
+          python3 -u scripts/kairos_fifo_proxy.py --policy fifo_expire --slots 1 --max-queue 64 --timeout 1 --max-clients 32 --port 8081 > out/idle-k1/fifo_k1/proxy.log 2>&1 &
+          proxy=$!
+          sleep 2
+          python3 scripts/kairos_multiturn.py --activities 0.05 --repeats 5 --short-ms 200 --long-ms 200 --sessions 20 --idle 2 --capture-fragments --url ws://127.0.0.1:8081/speech/tts --arm fifo_k1 --output out/idle-k1/fifo_k1 | tee out/idle-k1/fifo_k1/run.log
+          kill "$proxy"; wait "$proxy" || true
+          kill "$pid"; wait "$pid" || true
+      - name: Strict per-arm session and gate summary
+        run: |
+          python3 - <<'PY'
+          import json,math
+          from pathlib import Path
+          root=Path("out/idle-k1")
+          out={}
+          for arm in ("b8","fifo_k1"):
+              rows=json.loads((root/arm/"runs.json").read_text())
+              rows=[r for r in rows if not r["warmup"]]
+              sessions=[seq for r in rows for seq in r["turns"].values()]
+              turns=[t for seq in sessions for t in seq]
+              completed=[t for t in turns if t["status"]=="completed"]
+              tt=sorted(t["ttfa_ms"] for t in completed)
+              good=sum(all(t["status"]=="completed" and t["ttfa_ms"]<=200 and t["m0_episodes"]==0 and t["max_abs_lsb"] is not None and t["max_abs_lsb"]<=1 for t in seq) for seq in sessions)
+              out[arm]={"offered_sessions":len(sessions),"strict_valid_sessions":good,"completed_turns":len(completed),"rejected_or_failed_turns":len(turns)-len(completed),"m0_affected_turns":sum(t["m0_episodes"]>0 for t in completed),"pcm_fail_turns":sum(t["max_abs_lsb"] is None or t["max_abs_lsb"]>1 for t in completed),"ttfa_p99_completed_ms":tt[math.ceil(.99*len(tt))-1] if tt else None}
+          out["limitations"]="B8 vs KAIROS k1 demonstrates admission-decoupling effect, NOT superiority over optimized direct32 or sustained SES/euro; 4 measured sessions per arm."
+          (root/"verdict.json").write_text(json.dumps(out,indent=2)+"\n")
+          print(json.dumps(out,indent=2))
+          PY
+      - name: Upload evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: kairos-idle-connections-k1-evidence
+          path: out/idle-k1/
+          retention-days: 30
