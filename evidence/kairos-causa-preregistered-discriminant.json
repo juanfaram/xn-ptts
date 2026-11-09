@@ -1,0 +1,37 @@
+{
+  "schema": "kairos-causa-discriminant-v1",
+  "objective": "Maximize complete valid four-turn sessions per euro against B8 without relaxing TTFA p99 <=200ms, zero M0 stalls, PCM16 <=1 LSB",
+  "source_run": 42621484283,
+  "source_commit": "061ad07802ddeeb66140dcec80470404567ad62b",
+  "observed": {
+    "offered_sessions_each_arm": 85,
+    "useful_sessions": {"b8": 30, "fifo_expire": 73, "edf": 66},
+    "fifo_completed_turn_ttfa_p99_ms": 925.726,
+    "fifo_completed_turn_m0_stalls": 12,
+    "status": "pilot economic signal only; strict commercial gate failed"
+  },
+  "hypotheses": [
+    {
+      "id": "A",
+      "mechanism": "FIFO admission queue wait dominates high-load request-to-first-audio TTFA",
+      "prediction": "After controlling for admitted work and hardware, high TTFA covaries with enqueue-to-admit time while admit-to-first-audio remains relatively stable",
+      "falsifier": "TTFA remains >200ms at comparable rates even when enqueue-to-admit time is near zero"
+    },
+    {
+      "id": "B",
+      "mechanism": "Generation, CPU contention or measurement/playback contributes materially independent of queue wait",
+      "prediction": "Admission-to-first-audio or M0 stalls rise with concurrency even for negligible queue waits",
+      "falsifier": "These measures remain stable across matched high and low load while queue wait alone accounts for the TTFA increase"
+    }
+  ],
+  "minimum_intervention": {
+    "comparison": "B8 original vs FIFO+expiry only; no EDF, batching, new algorithm or new architecture",
+    "controlled": ["same pinned Phonon commit", "same runner and CPU identity", "same PCM16 reference and virtual M0 playback", "same four-turn text, idle and deadlines", "same offered arrival schedule and offered-session denominator"],
+    "change_one_variable": "Offered arrival intensity; pre-register low, intermediate and high load around the observed TTFA transition",
+    "record_per_turn": ["offer timestamp", "enqueue timestamp", "admit timestamp", "first-audio timestamp", "end timestamp", "admission rejection", "TTFA", "M0 episodes", "PCM max LSB"],
+    "global_gates": {"ttfa_p99_ms_max": 200, "m0_stalls_max": 0, "pcm_max_abs_lsb_max": 1, "count_all_offered_sessions": true},
+    "economics": "Measured useful complete sessions per elapsed paid runner time; report bootstrap uncertainty and distinguish pilot from sustained cost",
+    "stop": "Stop on failed invariants or noncomparable arrival traces; do not claim victory from successful GitHub job alone"
+  },
+  "decision": "Hypotheses OPEN. Do not attribute causality or certify SES/euro until discriminant is executed and strict gates pass."
+}
