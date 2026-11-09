@@ -1,4 +1,4 @@
-name: KAIROS B-high Q fixed2 versus C fixed2
+name: KAIROS B-high Q fixed3 versus C fixed3
 on:
   workflow_dispatch:
 permissions:
@@ -9,18 +9,18 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - label: BHIGHQ2
+          - label: BHIGHQ3
             arm: Q
-            permits: 2
+            permits: 3
             occupancy: 8
             sessions: 16
-            active: 2
-          - label: C2
+            active: 3
+          - label: C3
             arm: C
-            permits: 2
+            permits: 3
             occupancy: 8
             sessions: 16
-            active: 2
+            active: 3
     runs-on: ubuntu-latest
     timeout-minutes: 60
     steps:
@@ -49,6 +49,12 @@ jobs:
         env:
           RUSTFLAGS: '-C target-cpu=x86-64'
         run: cargo build --release -p ptts-ws-server
+      - name: Freeze binary and patch identity before workload
+        shell: bash
+        run: |
+          set -euo pipefail
+          sha256sum target/release/ptts-ws-server scripts/kairos_patch_ws_bhigh_q.py scripts/kairos_patch_ws_c.py scripts/kairos_ws_phased.py > out/build-identity.sha256
+          echo 'permits=3; arm=${{ matrix.arm }}; occupancy=${{ matrix.occupancy }}; sessions=${{ matrix.sessions }}' > out/policy-identity.txt
       - name: Download pinned public model
         run: |
           python3 - <<'PY'
