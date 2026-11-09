@@ -75,7 +75,6 @@ replace("""                flush_buffer(&app, session, text_buffer, stream_id, e
                 let _ = reply_tx.send(TtsReply::EndOfStream).await;""","""                flush_buffer(&app, session, text_buffer, stream_id, encoder, reply_tx, cancel, None)
                     .await?;
                 let _ = reply_tx.send(TtsReply::EndOfStream).await;""")
-replace("    cancel: &mut watch::Receiver<bool>,\n) -> Result<()> {", "    cancel: &mut watch::Receiver<bool>,\n) -> Result<()> {") # no-op
 replace("""async fn flush_buffer(
     app: &AppState,
     session: &Session,
