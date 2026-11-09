@@ -84,8 +84,15 @@ async def run(args):
     grouped={i:[] for i in range(SESSIONS)}
     for ev in events:grouped[ev["session"]].append(ev)
     started=time.perf_counter()
-    results=await asyncio.wait_for(asyncio.gather(*(client(i,args,grouped[i],started) for i in range(SESSIONS))),
-                                   timeout=SESSION_TIMEOUT_S)
+    async def bounded(i):
+        try:
+            return await asyncio.wait_for(client(i,args,grouped[i],started),timeout=SESSION_TIMEOUT_S)
+        except Exception as exc:
+            return {"session":i,"connected":False,"connection_error":"session_timeout: "+repr(exc),
+                    "turns":[{"turn":ev["turn"],"deadline_ms":ev["deadline_ms"],
+                              "status":"session_timeout","deadline_met":False,"chunks":[]}
+                             for ev in grouped[i]]}
+    results=await asyncio.gather(*(bounded(i) for i in range(SESSIONS)))
     duration=time.perf_counter()-started
     turns=[t for s in results for t in s["turns"]]
     assert len(turns)==SESSIONS*TURNS
@@ -101,7 +108,7 @@ def main():
     p.add_argument("--arm",required=True)
     p.add_argument("--activity",type=int,choices=(10,25,40),required=True)
     p.add_argument("--repeat",type=int,choices=range(1,6),required=True)
-    p.add_argument("--timeout",type=float,default=300)
+    p.add_argument("--timeout",type=float,default=180)
     p.add_argument("--output")
     p.add_argument("--warmup",action="store_true")
     args=p.parse_args()
