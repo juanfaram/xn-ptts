@@ -1,0 +1,81 @@
+name: KAIROS isolate external queue vs post admission
+on:
+  push:
+    branches: ['run/kairos-queue-latency-isolation']
+    paths: ['.github/workflows/kairos-queue-latency-isolation.yml', 'scripts/kairos_commercial_smoke.py', 'scripts/kairos_fifo_proxy.py']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  sweep:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 110
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Frozen source and environment audit
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p out/queue-isolation
+          git fetch origin e5110afd3ead725c940b6411eec4985fb8b111aa --depth=1
+          git diff --exit-code e5110afd3ead725c940b6411eec4985fb8b111aa HEAD -- ptts/src ptts-ws-server/src ptts-ws-server/Cargo.toml
+          { git rev-parse HEAD; git log --oneline -3; nproc; lscpu; free -m; } > out/queue-isolation/env.txt
+          python3 -m py_compile scripts/kairos_commercial_smoke.py scripts/kairos_fifo_proxy.py
+      - name: Download model and dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m pip install --user huggingface_hub 'websockets>=13,<17'
+          python3 - <<'PY'
+          from huggingface_hub import snapshot_download
+          snapshot_download(repo_id="gradium/phonon-31m-en",local_dir="phonon-model")
+          PY
+          find phonon-model -type f | sort > out/queue-isolation/model-files.txt
+      - name: Compile original server
+        run: cargo build --release -p ptts-ws-server
+      - name: Start original WS server m8
+        shell: bash
+        run: |
+          set -euo pipefail
+          RUST_LOG=info ./target/release/ptts-ws-server --model phonon-model --voice-catalog '' --lang en --device cpu --max-concurrent-requests 32 --addr 127.0.0.1:8080 > out/queue-isolation/server.log 2>&1 &
+          echo $! > out/queue-isolation/server.pid
+          python3 - <<'PY'
+          import socket,time,subprocess
+          for i in range(120):
+              if subprocess.run(["kill","-0",open("out/queue-isolation/server.pid").read().strip()],capture_output=True).returncode:
+                  raise SystemExit("server exited")
+              try:
+                  s=socket.create_connection(("127.0.0.1",8080),timeout=1);s.close();break
+              except OSError:time.sleep(1)
+          else:raise SystemExit("server did not start")
+          PY
+      - name: Short 4-turn trace, same EPYC runner, 25 and 50 percent activity
+        shell: bash
+        run: |
+          set -euo pipefail
+          for policy in fifo_expire edf; do
+            mkdir -p "out/queue-isolation/$policy"
+            python3 -u scripts/kairos_fifo_proxy.py --policy "$policy" --slots 3 --max-queue 64 --timeout 1 --max-clients 24 --port 8081 > "out/queue-isolation/$policy/proxy.log" 2>&1 &
+            proxy_pid=$!
+            sleep 2
+            python3 scripts/kairos_multiturn.py --trace --activities 0.25 0.50 --repeats 1 --url ws://127.0.0.1:8081/speech/tts --arm "$policy" --sessions 20 --idle 20 --output "out/queue-isolation/$policy" | tee "out/queue-isolation/$policy/run.log"
+            kill "$proxy_pid"
+            wait "$proxy_pid" || true
+            sleep 2
+          done
+      - name: Freeze source and binary identity
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          { git rev-parse HEAD; sha256sum scripts/kairos_multiturn.py scripts/kairos_fifo_proxy.py scripts/kairos_playback_v2.py; sha256sum target/release/ptts-ws-server || true; } > out/queue-isolation/identity.txt
+      - name: Upload evidence even on failure
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: kairos-queue-isolation-evidence
+          path: out/queue-isolation/
+          retention-days: 30
