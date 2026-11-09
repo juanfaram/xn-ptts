@@ -1,3 +1,9 @@
+# FALSIFICATION RULE (frozen before measurement):
+# If C does not beat B-high+Q in valid sessions per euro under identical load,
+# the demonstrated KAIROS advantage over a conventional queue is ZERO.
+# If EDF benefits short deadlines by starving long ones, report a tradeoff, NOT a win.
+# NO PHONON until three proxy non-interference tests pass and both memory limits
+# are calibrated from 10/25/50/100 idle sessions at 80% runner RAM.
 name: KAIROS B-high Q fixed3 versus C fixed3
 on:
   workflow_dispatch:
@@ -25,6 +31,12 @@ jobs:
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
+      - name: Block Phonon until EDF, memory calibration and three proxy tests are proven
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "NOT READY: requires EDF deadline expiry, per-arm RSS regression, fixed 30/70 workload, and 3 green proxy non-interference tests."
+          exit 1
       - name: Verify frozen source
         shell: bash
         run: |
@@ -53,7 +65,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          sha256sum target/release/ptts-ws-server scripts/kairos_patch_ws_bhigh_q.py scripts/kairos_patch_ws_c.py scripts/kairos_ws_phased.py > out/build-identity.sha256
+          sha256sum target/release/ptts-ws-server scripts/kairos_patch_ws_bhigh_q.py scripts/kairos_patch_ws_c.py scripts/kairos_ws_phased.py .github/workflows/kairos-bhighq-vs-c.yml > out/build-identity.sha256
           echo 'permits=3; arm=${{ matrix.arm }}; occupancy=${{ matrix.occupancy }}; sessions=${{ matrix.sessions }}' > out/policy-identity.txt
       - name: Download pinned public model
         run: |
