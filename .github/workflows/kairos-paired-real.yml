@@ -59,6 +59,7 @@ jobs:
               except OSError:time.sleep(1)
           else:raise SystemExit("server did not start")
           PY
+              python3 scripts/kairos_paired_ws_runner.py --warmup --arm "${{ matrix.arm }}" --activity "$ACT" --repeat "$REP" --timeout 180
               python3 scripts/kairos_paired_ws_runner.py --arm "${{ matrix.arm }}" --activity "$ACT" --repeat "$REP" --output "out/${ACT}-${REP}.json"
               kill "$PID" 2>/dev/null || true
               wait "$PID" 2>/dev/null || true
