@@ -102,6 +102,11 @@ jobs:
               trap - EXIT
             done
           done
+      - name: Reconcile SES and mark incomplete runs
+        if: always()
+        shell: bash
+        run: |
+          python3 scripts/kairos_ses_summary.py out --arm "${{ matrix.arm }}" --expected 15 --rate "$REFERENCE_EUR_PER_HOUR"
       - name: Upload original evidence
         if: always()
         uses: actions/upload-artifact@v4
